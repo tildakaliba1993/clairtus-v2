@@ -1,0 +1,15 @@
+# Clairtus V2 - Core-Out Escrow Engine Rules
+
+## 1. Engineering Directives (Anti-Vibe-Coding)
+* **NO MARKDOWN REPORTS:** You are strictly forbidden from creating `TESTING_COMPLETE.md`, `100_PERCENT_PASSING.md`, or any fake success reports.
+* **SURGICAL FIXES ONLY:** Never rewrite an entire file to fix a single line.
+* **100% DETERMINISTIC:** No AI intent extraction. The bot is a rigid state machine. 
+
+## 2. Financial Architecture (Built for African Scale)
+* **Phone Numbers:** Stored STRICTLY in E.164 international format (e.g., `+243810000000`). This ensures our database is instantly compatible with any African country.
+* **Live Money First:** We are testing with real $1 transactions. Do NOT mock PawaPay API responses. 
+
+## 3. Tech Stack Strictness
+* **Backend:** Supabase Edge Functions (Deno/TypeScript). No Node.js.
+* **Imports:** Use Deno URL imports (`https://deno.land/x/...`).
+* **Environment:** Use `Deno.env.get()`, NEVER `process.env`.
