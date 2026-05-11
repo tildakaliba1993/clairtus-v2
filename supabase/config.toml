@@ -1,0 +1,66 @@
+
+[functions.test-deposit]
+enabled = true
+verify_jwt = true
+import_map = "./functions/test-deposit/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/test-deposit/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/test-deposit/*.html" ]
+
+[functions.test-payout]
+enabled = true
+verify_jwt = true
+import_map = "./functions/test-payout/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/test-payout/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/test-payout/*.html" ]
+
+[functions.test-refund]
+enabled = true
+verify_jwt = true
+import_map = "./functions/test-refund/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/test-refund/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/test-refund/*.html" ]
+
+[functions.pawapay-webhook]
+enabled = true
+verify_jwt = true
+import_map = "./functions/pawapay-webhook/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/pawapay-webhook/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/pawapay-webhook/*.html" ]
+
+[functions.whatsapp-webhook]
+enabled = true
+verify_jwt = true
+import_map = "./functions/whatsapp-webhook/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/whatsapp-webhook/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/whatsapp-webhook/*.html" ]
+
+[functions.test-whatsapp]
+enabled = true
+verify_jwt = true
+import_map = "./functions/test-whatsapp/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/test-whatsapp/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/test-whatsapp/*.html" ]
