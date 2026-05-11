@@ -4,9 +4,11 @@ import { sendWhatsAppText, sendWhatsAppButtons, sendWhatsAppTemplate } from "./w
 import { MESSAGES } from "./whatsappMessaging.ts";
 import { initiatePawaPayDeposit, initiatePawaPayPayout } from "./pawapayClient.ts";
 
+const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\nPour protéger tout le monde, voici nos règles de sécurité :\n\n1️⃣ *Frais:* L'acheteur paie exactement le prix de l'article. Lors du paiement au vendeur, Clairtus déduit une commission de *2.5%* couvrant les frais opérateurs.\n2️⃣ *Remboursements:* Si la transaction est annulée, l'acheteur est remboursé intégralement (100%).\n3️⃣ *Litiges:* En cas de désaccord, l'argent est gelé dans notre coffre-fort. L'équipe Clairtus examinera les preuves pour trancher.\n\nAcceptez-vous ces conditions pour continuer ?";
+
 export async function processMessage(phone: string, text: string) {
   const supabase = getSupabaseClient();
-  const cleanText = text.trim();
+  const cleanText = text.trim().replace(/^\//, '');
 
   console.log(`\n--- 🚀 NEW MESSAGE START ---`);
   console.log(`[State Machine] Processing message from ${phone}: "${cleanText}"`);
@@ -15,16 +17,28 @@ export async function processMessage(phone: string, text: string) {
     let { data: user } = await supabase.from("users").select("*").eq("phone_number", phone).single();
     let { data: session } = await supabase.from("sessions").select("*").eq("phone_number", phone).single();
 
+    // 🚀 NEW: The T&C Onboarding for Brand New Users
     if (!user || !session) {
       await supabase.from("users").upsert({ phone_number: phone });
-      await supabase.from("sessions").upsert({ phone_number: phone, current_state: "AWAITING_FIRST_NAME" });
-      await sendWhatsAppText(phone, MESSAGES.FIRST_NAME_REQUEST);
+      await supabase.from("sessions").upsert({ phone_number: phone, current_state: "AWAITING_TC" });
+      await sendWhatsAppButtons(phone, TC_MESSAGE, [
+        { id: "CMD_ACCEPTER_TC", title: "✅ J'ACCEPTE" },
+        { id: "CMD_REFUSER_TC", title: "❌ JE REFUSE" }
+      ]);
       return;
     }
 
-    // 🚨 THE GLOBAL CANCEL & REFUND TRAP
+    const isHelpCommand = ["AIDE", "CMD_AIDE", "HELP"].includes(cleanText.toUpperCase());
+    if (isHelpCommand) {
+      console.log(`[Help Trap] Triggered by ${phone}`);
+      await sendWhatsAppText(phone, "🛡️ *Support Clairtus*\n\nVous êtes sur notre terminal de paiement sécurisé. Votre argent est protégé.\n\n👉 Pour annuler l'opération en cours, tapez *ANNULER*.\n👉 Pour voir vos contrats, tapez *MES TRANSACTIONS*.\n\n_Si vous avez un problème urgent, écrivez votre question ici et un agent humain vous répondra._");
+      return; 
+    }
+
     const isCancelCommand = ["ANNULER", "CMD_ANNULER", "REFUSER", "CMD_REFUSER"].includes(cleanText.toUpperCase());
-    const isRegistrationState = ["AWAITING_FIRST_NAME", "AWAITING_LAST_NAME", "AWAITING_FIRST_NAME_INVITED", "AWAITING_LAST_NAME_INVITED"].includes(session.current_state);
+    
+    // 🚀 FIXED: Added TC states to the ignore list so "REFUSER" works correctly during onboarding
+    const isRegistrationState = ["AWAITING_TC", "AWAITING_TC_INVITED", "AWAITING_FIRST_NAME", "AWAITING_LAST_NAME", "AWAITING_FIRST_NAME_INVITED", "AWAITING_LAST_NAME_INVITED"].includes(session.current_state);
 
     if (isCancelCommand && !isRegistrationState) {
       console.log(`[Global Cancel] Triggered by ${phone}`);
@@ -44,14 +58,10 @@ export async function processMessage(phone: string, text: string) {
       }
 
       if (txToCancel) {
-        // 🛡️ THE DUAL-LOCK REFUND ARCHITECTURE
         if (txToCancel.status === "FUNDED") {
-          
-          // SCENARIO 1: Seller cancels (100% safe to auto-refund)
           if (phone === txToCancel.seller_phone) {
              console.log(`[Refund] Seller initiated safe cancellation for TX ${txToCancel.reference}`);
              await sendWhatsAppText(phone, "⏳ Annulation confirmée. Remboursement automatique de l'acheteur en cours...");
-             
              try {
                 const refundId = crypto.randomUUID();
                 await initiatePawaPayPayout(refundId, txToCancel.base_amount, txToCancel.buyer_phone);
@@ -67,12 +77,8 @@ export async function processMessage(phone: string, text: string) {
                 await sendWhatsAppText(phone, "❌ Erreur technique lors du remboursement. Le support a été alerté.");
              }
              return;
-          } 
-          
-          // SCENARIO 2: Buyer cancels (Requires Seller Approval)
-          else if (phone === txToCancel.buyer_phone) {
+          } else if (phone === txToCancel.buyer_phone) {
              console.log(`[Refund] Buyer requesting cancellation for TX ${txToCancel.reference}`);
-             
              await supabase.from("transactions").update({ status: "CANCELLATION_REQUESTED" }).eq("id", txToCancel.id);
              await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
              await sendWhatsAppText(phone, "⏳ Votre demande d'annulation a été envoyée au vendeur pour approbation. S'il accepte, vous serez remboursé immédiatement.");
@@ -86,7 +92,6 @@ export async function processMessage(phone: string, text: string) {
           }
         }
 
-        // Standard Cancel Logic (Before money is locked)
         await supabase.from("transactions").update({ status: "CANCELLED" }).eq("id", txToCancel.id);
         const counterpartyPhone = (txToCancel.seller_phone === phone) ? txToCancel.buyer_phone : txToCancel.seller_phone;
         
@@ -103,6 +108,16 @@ export async function processMessage(phone: string, text: string) {
 
     // 🚦 STATE ROUTING
     switch (session.current_state) {
+      // 🚀 NEW: Handling the direct user T&C
+      case "AWAITING_TC":
+        if (cleanText === "CMD_ACCEPTER_TC" || cleanText.toUpperCase() === "J'ACCEPTE") {
+          await supabase.from("sessions").update({ current_state: "AWAITING_FIRST_NAME" }).eq("phone_number", phone);
+          await sendWhatsAppText(phone, MESSAGES.FIRST_NAME_REQUEST);
+        } else {
+          await sendWhatsAppText(phone, "⚠️ Vous devez accepter nos conditions pour utiliser Clairtus. Tapez BONJOUR si vous changez d'avis.");
+        }
+        break;
+
       case "AWAITING_FIRST_NAME":
         await supabase.from("users").update({ first_name: cleanText }).eq("phone_number", phone);
         await supabase.from("sessions").update({ current_state: "AWAITING_LAST_NAME" }).eq("phone_number", phone);
@@ -119,7 +134,7 @@ export async function processMessage(phone: string, text: string) {
         break;
 
       case "MAIN_MENU":
-        if (cleanText.toUpperCase() === "BONJOUR") {
+        if (cleanText.toUpperCase() === "BONJOUR" || cleanText.toUpperCase() === "MENU") {
           await sendWhatsAppButtons(phone, MESSAGES.WELCOME_RETURNING(user.first_name, user.last_name), [
             { id: "CMD_VENDRE", title: "VENDRE" }, { id: "CMD_ACHETER", title: "ACHETER" }, { id: "CMD_TRANSACTIONS", title: "MES TRANSACTIONS" }
           ]);
@@ -129,6 +144,39 @@ export async function processMessage(phone: string, text: string) {
         } else if (cleanText === "CMD_ACHETER" || cleanText.toUpperCase() === "ACHETER") {
           await supabase.from("sessions").update({ current_state: "AWAITING_ITEM_DESCRIPTION_BUY" }).eq("phone_number", phone);
           await sendWhatsAppText(phone, MESSAGES.BUY_ITEM_REQUEST);
+        } 
+        else if (cleanText === "CMD_TRANSACTIONS" || cleanText.toUpperCase() === "MES TRANSACTIONS") {
+          const { data: txs, error } = await supabase
+            .from("transactions")
+            .select("*")
+            .or(`seller_phone.eq.${phone},buyer_phone.eq.${phone}`)
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+          if (error || !txs || txs.length === 0) {
+            await sendWhatsAppText(phone, "📭 Vous n'avez aucune transaction dans votre historique.\n\nCliquez sur VENDRE ou ACHETER pour commencer.");
+          } else {
+            let txList = "📜 *Vos 5 dernières transactions:*\n\n";
+            txs.forEach((tx, index) => {
+              const role = tx.seller_phone === phone ? "Vendeur" : "Acheteur";
+              const amount = tx.base_amount ? `${tx.base_amount} $` : "Prix en attente";
+              const item = tx.item_description || "Article non défini";
+              let statusLabel = tx.status;
+              if (tx.status === "DRAFT") statusLabel = "📝 Brouillon";
+              else if (tx.status === "INITIATED") statusLabel = "⏳ En attente";
+              else if (tx.status === "PENDING_FUNDING") statusLabel = "💳 En attente de paiement";
+              else if (tx.status === "FUNDED") statusLabel = "🔒 Fonds sécurisés";
+              else if (tx.status === "COMPLETED") statusLabel = "✅ Terminée";
+              else if (tx.status === "CANCELLED") statusLabel = "🚫 Annulée";
+              else if (tx.status === "REFUNDED") statusLabel = "💸 Remboursée";
+              else if (tx.status === "CANCELLATION_REQUESTED") statusLabel = "⚠️ Annulation en attente";
+              else if (tx.status === "DISPUTED") statusLabel = "🚨 En litige";
+
+              txList += `*${index + 1}. ${item}*\nRôle: ${role} | ${amount}\nStatut: ${statusLabel}\nRéf: ${tx.reference}\n\n`;
+            });
+            txList += "Tapez BONJOUR pour revenir au menu.";
+            await sendWhatsAppText(phone, txList);
+          }
         } else {
           await sendWhatsAppText(phone, MESSAGES.UNKNOWN_MESSAGE);
         }
@@ -138,14 +186,14 @@ export async function processMessage(phone: string, text: string) {
         const sellRef = "CLT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
         const { data: sellTx } = await supabase.from("transactions").insert({ reference: sellRef, seller_phone: phone, item_description: cleanText, status: "DRAFT" }).select().single();
         await supabase.from("sessions").update({ current_state: "AWAITING_PRICE_SELL", draft_transaction_id: sellTx.id }).eq("phone_number", phone);
-        await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_SELL(cleanText));
+        await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_SELL(cleanText) + "\n\n_(Tapez ANNULER pour quitter)_");
         break;
 
       case "AWAITING_ITEM_DESCRIPTION_BUY":
         const buyRef = "CLT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
         const { data: buyTx } = await supabase.from("transactions").insert({ reference: buyRef, buyer_phone: phone, item_description: cleanText, status: "DRAFT" }).select().single();
         await supabase.from("sessions").update({ current_state: "AWAITING_PRICE_BUY", draft_transaction_id: buyTx.id }).eq("phone_number", phone);
-        await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_BUY(cleanText));
+        await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_BUY(cleanText) + "\n\n_(Tapez ANNULER pour quitter)_");
         break;
 
       case "AWAITING_PRICE_SELL": {
@@ -205,13 +253,17 @@ export async function processMessage(phone: string, text: string) {
       case "INVITED_BUYER":
       case "INVITED_SELLER":
         if (cleanText === "CMD_ACCEPTER" || cleanText.toUpperCase() === "ACCEPTER") {
+          // 🚀 NEW: The T&C Onboarding for Invited Users
           if (!user.first_name || !user.last_name) {
-            await supabase.from("sessions").update({ current_state: "AWAITING_FIRST_NAME_INVITED" }).eq("phone_number", phone);
-            await sendWhatsAppText(phone, MESSAGES.FIRST_NAME_REQUEST);
+            await supabase.from("sessions").update({ current_state: "AWAITING_TC_INVITED" }).eq("phone_number", phone);
+            await sendWhatsAppButtons(phone, TC_MESSAGE, [
+              { id: "CMD_ACCEPTER_TC_INVITED", title: "✅ J'ACCEPTE" },
+              { id: "CMD_REFUSER_TC_INVITED", title: "❌ JE REFUSE" }
+            ]);
           } else {
             await finalizeContractAndPromptPayment(phone, session, supabase);
           }
-        } else if (cleanText.toUpperCase() === "BONJOUR") {
+        } else if (cleanText.toUpperCase() === "BONJOUR" || cleanText.toUpperCase() === "MENU") {
           const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
           if (session.current_state === "INVITED_BUYER") {
             await sendWhatsAppTemplate(phone, "invite_acheteur", [tx.seller_phone, tx.item_description, tx.base_amount.toString()]);
@@ -220,6 +272,17 @@ export async function processMessage(phone: string, text: string) {
           }
         } else {
           await sendWhatsAppText(phone, MESSAGES.UNKNOWN_MESSAGE);
+        }
+        break;
+
+      // 🚀 NEW: Handling the invited user T&C
+      case "AWAITING_TC_INVITED":
+        if (cleanText === "CMD_ACCEPTER_TC_INVITED" || cleanText.toUpperCase() === "J'ACCEPTE") {
+          await supabase.from("sessions").update({ current_state: "AWAITING_FIRST_NAME_INVITED" }).eq("phone_number", phone);
+          await sendWhatsAppText(phone, MESSAGES.FIRST_NAME_REQUEST);
+        } else {
+          await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+          await sendWhatsAppText(phone, "⚠️ Vous avez refusé nos conditions. L'invitation au contrat a été annulée. Tapez BONJOUR pour voir le menu.");
         }
         break;
 
@@ -238,7 +301,6 @@ export async function processMessage(phone: string, text: string) {
         if (cleanText === "CMD_PAYER" || cleanText.toUpperCase() === "PAYER") {
           const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
           await sendWhatsAppText(phone, MESSAGES.DEPOSIT_INITIATED);
-          
           try {
             const depositId = crypto.randomUUID();
             await initiatePawaPayDeposit(depositId, tx.base_amount, phone);
@@ -259,12 +321,10 @@ export async function processMessage(phone: string, text: string) {
 
       case "AWAITING_DELIVERY_SELLER": {
         let txFunded = null;
-        
         if (session.draft_transaction_id) {
           const { data } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
           txFunded = data;
         }
-        
         if (!txFunded) {
           const { data } = await supabase.from("transactions").select("*").eq("seller_phone", phone).eq("status", "FUNDED").single();
           txFunded = data;
@@ -277,20 +337,16 @@ export async function processMessage(phone: string, text: string) {
         }
 
         const enteredPin = cleanText.replace(/\D/g, '');
-        
         if (enteredPin === txFunded.pin_code && enteredPin.length > 0) {
           try {
             const payoutId = crypto.randomUUID();
             const payoutAmount = Number((txFunded.base_amount * 0.975).toFixed(2));
-            
             await sendWhatsAppText(phone, MESSAGES.PAYOUT_INITIATED(payoutAmount));
             await initiatePawaPayPayout(payoutId, payoutAmount, phone);
-            
             await supabase.from("transactions").update({ status: "COMPLETED", pawapay_payout_id: payoutId }).eq("id", txFunded.id);
             await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
             await sendWhatsAppText(txFunded.buyer_phone, MESSAGES.BUYER_DELIVERY_CONFIRMED);
             await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", txFunded.buyer_phone);
-
           } catch (error) {
             console.error("Payout Error:", error);
             await sendWhatsAppText(phone, "❌ Erreur technique lors du transfert. Notre équipe a été alertée.");
@@ -301,20 +357,16 @@ export async function processMessage(phone: string, text: string) {
         break;
       }
 
-      // ⚖️ THE NEW CANCELLATION APPROVAL STATE
       case "AWAITING_CANCELLATION_APPROVAL": {
         const { data: cancelTx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
-        
         if (cleanText === "CMD_ACCEPTER_ANNULATION" || cleanText.toUpperCase() === "ACCEPTER") {
            await sendWhatsAppText(phone, "⏳ Annulation acceptée. Remboursement de l'acheteur en cours...");
            try {
               const refundId = crypto.randomUUID();
               await initiatePawaPayPayout(refundId, cancelTx.base_amount, cancelTx.buyer_phone);
               await supabase.from("transactions").update({ status: "REFUNDED" }).eq("id", cancelTx.id);
-              
               await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
               await sendWhatsAppText(phone, "☑️ Dossier clos. Tapez BONJOUR pour revenir au menu.");
-              
               await sendWhatsAppText(cancelTx.buyer_phone, `✅ Le vendeur a accepté l'annulation. Un remboursement de ${cancelTx.base_amount} $ a été envoyé sur votre compte Mobile Money.`);
            } catch (error) {
               console.error("Refund Error:", error);
@@ -324,7 +376,6 @@ export async function processMessage(phone: string, text: string) {
            await supabase.from("transactions").update({ status: "DISPUTED" }).eq("id", cancelTx.id);
            await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
            await sendWhatsAppText(phone, "🚨 La transaction a été bloquée et signalée en litige. Notre équipe de support vous contactera sous peu. Tapez BONJOUR pour revenir au menu.");
-           
            await sendWhatsAppText(cancelTx.buyer_phone, "🚨 Le vendeur a refusé l'annulation (indiquant que l'article a été livré). La transaction est gelée et notre support va vous contacter.");
         } else {
            await sendWhatsAppText(phone, "Veuillez cliquer sur ACCEPTER ou REFUSER (LITIGE).");
@@ -357,13 +408,10 @@ export async function processMessage(phone: string, text: string) {
 async function finalizeContractAndPromptPayment(acceptingPhone: string, session: any, supabase: any) {
   const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
   await supabase.from("transactions").update({ status: "PENDING_FUNDING" }).eq("id", tx.id);
-
   await sendWhatsAppText(tx.seller_phone, MESSAGES.CONTRACT_ACCEPTED_SELLER_NOTIFIED);
-
   if (session.current_state === "INVITED_SELLER") {
     await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", tx.seller_phone);
   }
-
   await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER", draft_transaction_id: tx.id }).eq("phone_number", tx.buyer_phone);
   await sendWhatsAppButtons(tx.buyer_phone, MESSAGES.PRE_PAYMENT_BUYER, [{ id: "CMD_PAYER", title: "PAYER MAINTENANT" }, { id: "CMD_ANNULER", title: "ANNULER" }, { id: "CMD_AIDE", title: "AIDE" }]);
 }
