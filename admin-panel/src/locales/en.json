@@ -1,0 +1,73 @@
+{
+  "nav": {
+    "programs": "Infrastructure",
+    "benefits": "Benefits",
+    "faq": "FAQ",
+    "login": "Support",
+    "apply": "Get started"
+  },
+  "hero": {
+    "badge": "Regulated Payments Infrastructure 🇨🇩",
+    "title": "The Escrow Backbone for Commerce in Congo.",
+    "subtitle": "Stop taking undue risk. Clairtus secures funds through regulated escrow wallets and unlocks payouts instantly via PIN—all on WhatsApp, zero friction.",
+    "primaryCta": "Secure a transaction",
+    "secondaryCta": "How it works"
+  },
+  "stats": {
+    "rate": "100%",
+    "rateLabel": "Fraud-proof protection",
+    "salary": "< 3s",
+    "salaryLabel": "Payout velocity",
+    "network": "Regulated",
+    "networkLabel": "Financial compliance"
+  },
+  "features": {
+    "title": "An architecture engineered for uncompromising trust.",
+    "subtitle": "Frontier infrastructure for real-world economies.",
+    "items": [
+      {
+        "title": "Bulletproof antifraud assurance",
+        "description": "Buyer funds stay cryptographically held in licensed collection wallets until physical delivery is verified."
+      },
+      {
+        "title": "Instant liquidity",
+        "description": "Binary validation—once the 4‑digit PIN is captured, our API settles to the merchant’s Mobile Money wallet in under three seconds."
+      },
+      {
+        "title": "Zero friction — WhatsApp native",
+        "description": "No app installs. Clairtus is fully native to WhatsApp for instantaneous adoption across your network."
+      },
+      {
+        "title": "Human-led dispute resolution",
+        "description": "If delivery sparks a dispute, the protocol freezes the escrow and our compliance cell takes over until a fair outcome."
+      }
+    ]
+  },
+  "programs": {
+    "title": "The Clairtus Protocol",
+    "subtitle": "An asynchronous transaction flow built for transparency and security.",
+    "items": [
+      {
+        "title": "1. Initialization",
+        "description": "The seller configures terms inside our WhatsApp automation. Buyers receive an encrypted provisioning link covering Airtel, Orange, and M‑Pesa."
+      },
+      {
+        "title": "2. Escrow & PIN",
+        "description": "Clairtus verifies funding and emits a buyer-only PIN. The seller can ship merchandise with indemnified certainty."
+      },
+      {
+        "title": "3. Settlement",
+        "description": "At delivery handoff the buyer transmits the PIN, the merchant submits it to the bot—the transaction settles and payouts release instantly."
+      }
+    ]
+  },
+  "cta": {
+    "title": "Upgrade to institutional-grade escrow.",
+    "subtitle": "Join professionals who already treat Clairtus as their transaction standard.",
+    "button": "Create my secure link"
+  },
+  "footer": {
+    "description": "Clairtus — Trust infrastructure for Africa’s informal economy.",
+    "rights": "© 2026 Clairtus. All rights reserved."
+  }
+}
