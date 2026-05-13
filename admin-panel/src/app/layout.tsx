@@ -1,3 +1,4 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Geist_Mono, Red_Hat_Display } from "next/font/google";
@@ -49,7 +50,8 @@ export default function RootLayout({
       lang="fr"
       className={`${redHatDisplay.variable} ${geistMono.variable} h-full scroll-smooth antialiased`}
     >
-      <body className="min-h-full flex flex-col font-sans antialiased">
+      {/* 🛡️ Added suppressHydrationWarning to ignore Grammarly/browser extensions */}
+      <body suppressHydrationWarning={true} className="min-h-full flex flex-col font-sans antialiased">
         {children}
       </body>
     </html>

@@ -151,7 +151,6 @@ export async function processMessage(phone: string, text: string) {
                         { id: "CMD_TRANSACTIONS", title: "📜 HISTORIQUE" }
                     ]);
                 } else if (cleanText === "CMD_VENDRE" || cleanText.toUpperCase() === "VENDRE") {
-                    // 🛡️ EDGE CASE 2: CHECK FOR STALE TRANSACTIONS
                     const { data: staleTx } = await supabase
                         .from("transactions")
                         .select("id, reference")
@@ -430,6 +429,35 @@ export async function processMessage(phone: string, text: string) {
                 break;
             }
 
+            // 🛡️ LOOPHOLE 2: ACCOUNT LIMITS & PAYOUT REDIRECTION
+            case "AWAITING_NEW_PAYOUT_NUMBER": {
+                const { data: txToPay } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
+                
+                if (cleanText.toUpperCase() === "RÉESSAYER" || cleanText.toUpperCase() === "REESSAYER") {
+                    const payoutId = crypto.randomUUID();
+                    const payoutAmount = Number((txToPay.base_amount * 0.975).toFixed(2));
+                    await sendWhatsAppText(phone, "⏳ Nouvelle tentative d'envoi vers votre numéro principal...");
+                    await initiatePawaPayPayout(payoutId, phone, payoutAmount, txToPay.currency);
+                    
+                    await supabase.from("transactions").update({ pawapay_payout_id: payoutId }).eq("id", txToPay.id);
+                    await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+                } else {
+                    let newPhone = cleanText.replace(/\+/g, '').replace(/\s/g, '');
+                    if (newPhone.startsWith("0") && newPhone.length === 10) newPhone = "243" + newPhone.substring(1);
+                    if (!/^\d{10,15}$/.test(newPhone)) return await sendWhatsAppText(phone, MESSAGES.PHONE_INVALID);
+                    
+                    const payoutId = crypto.randomUUID();
+                    const payoutAmount = Number((txToPay.base_amount * 0.975).toFixed(2));
+                    await sendWhatsAppText(phone, `⏳ Envoi des fonds vers le nouveau numéro ${newPhone}...`);
+                    await initiatePawaPayPayout(payoutId, newPhone, payoutAmount, txToPay.currency);
+                    
+                    const updatedNote = txToPay.admin_note ? `${txToPay.admin_note} | Payout redirected to ${newPhone}` : `Payout redirected to ${newPhone}`;
+                    await supabase.from("transactions").update({ pawapay_payout_id: payoutId, admin_note: updatedNote }).eq("id", txToPay.id);
+                    await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+                }
+                break;
+            }
+
             case "AWAITING_CANCELLATION_APPROVAL": {
                 const { data: cancelTx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
                 if (cleanText === "CMD_ACCEPTER_ANNULATION" || cleanText.toUpperCase() === "ACCEPTER") {
@@ -498,8 +526,6 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
         warning = `\n\n⚠️ *ALERTE RÉSEAU :* Nous détectons actuellement des instabilités chez ${netName}. Le paiement peut nécessiter d'appuyer sur RÉESSAYER en cas d'échec du premier essai.`;
     }
 
-    // 🛡️ EDGE CASE 3: FX TRANSPARENCY DISCLAIMER
-    // If currency is USD, warn about operator conversion to CDF
     let currencyWarning = "";
     if (tx.currency === "USD") {
         currencyWarning = `\n\n💡 *Note :* Si votre compte est en CDF, votre opérateur appliquera son propre taux de change pour atteindre le montant en USD.`;

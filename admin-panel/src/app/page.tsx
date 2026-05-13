@@ -1,842 +1,251 @@
+// src/app/page.tsx
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
-import type { LucideIcon } from "lucide-react";
-import Image from "next/image";
-import {
-  ArrowRightLeft,
-  Fingerprint,
-  LockKeyhole,
-  Scale,
-  ShieldCheck,
-  Terminal,
-  Zap,
-} from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import content from "@/locales/fr.json";
-import { getWhatsAppBotUrl } from "@/lib/marketing-links";
+import { useState, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX } from "lucide-react";
 
-const FEATURE_ICONS: LucideIcon[] = [
-  ShieldCheck,
-  Zap,
-  Fingerprint,
-  Scale,
-];
-const PROGRAM_ICONS: LucideIcon[] = [Terminal, LockKeyhole, ArrowRightLeft];
-type DemoView = "vendeur" | "acheteur";
-type ChatMessage = {
-  sender: "user" | "bot";
-  delay: number;
-  text: string;
-};
-const MIN_TYPING_LEAD_MS = 130;
-const MAX_TYPING_LEAD_MS = 880;
+export default function AdminPortal() {
+  const [session, setSession] = useState<any>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  
+  // Dashboard State
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [userMap, setUserMap] = useState<Record<string, any>>({});
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-function estimateTypingLeadMs(text: string): number {
-  const compactText = text.replace(/\s+/g, " ").trim();
-  const readingUnits = compactText.length * 8;
-  const punctuationBonus = (compactText.match(/[.,:;!?]/g) ?? []).length * 14;
-  const emojiBonus = (compactText.match(/[🔐✅🎉👏🥳💡⚠️👋]/g) ?? []).length * 24;
-  const estimate = 90 + readingUnits + punctuationBonus + emojiBonus;
-  return Math.max(MIN_TYPING_LEAD_MS, Math.min(MAX_TYPING_LEAD_MS, estimate));
-}
-const VENDEUR_CONVERSATION: ChatMessage[] = [
-  { sender: "user", delay: 0.5, text: "BONJOUR" },
-  {
-    sender: "bot",
-    delay: 1.5,
-    text:
-      "👋 Bonjour et bienvenue chez Clairtus.\n\nClairtus sécurise vos transactions entre acheteur et vendeur :\n• l'acheteur paie en sécurité\n• le vendeur est payé après confirmation\n• tout est tracé pour protéger les deux parties\n\nQue souhaitez-vous faire aujourd'hui ?\n[ VENDRE ]  [ ACHETER ]",
-  },
-  { sender: "user", delay: 3, text: "VENDRE" },
-  {
-    sender: "bot",
-    delay: 4,
-    text: "Parfait ✅\n\nDécrivez brièvement ce que vous vendez.\nExemple : MacBook Air M1 2020",
-  },
-  { sender: "user", delay: 5.2, text: "Smartphone Samsung A54 neuf" },
-  {
-    sender: "bot",
-    delay: 6.3,
-    text: "Super 👍\n\nQuel est le prix en $ ?\nRépondez uniquement avec un nombre.\nExemple : 900\n\n💡 Clairtus déduit 2,5% du montant total.",
-  },
-  { sender: "user", delay: 7.4, text: "120" },
-  {
-    sender: "bot",
-    delay: 8.5,
-    text:
-      "Parfait.\n\nEnvoyez maintenant le numéro de l'acheteur en format international.\nExemple : +243...\n\nLe numéro doit appartenir à la contrepartie et être valide pour Mobile Money.\nOpérateurs supportés : M-Pesa, Orange Money, Airtel Money.",
-  },
-  { sender: "user", delay: 9.8, text: "+243 81 000 0000" },
-  {
-    sender: "bot",
-    delay: 10.8,
-    text: "✅ Merci.\n\nNous lançons votre transaction sécurisée.",
-  },
-  {
-    sender: "bot",
-    delay: 12,
-    text:
-      "✅ La contrepartie a accepté.\n\nNous attendons maintenant la confirmation du paiement Mobile Money.",
-  },
-  {
-    sender: "bot",
-    delay: 13.6,
-    text:
-      "✅ Fonds sécurisés.\n\nLe client a bloqué 120.00 USD.\n\nLivrez la commande, puis demandez le code PIN client et envoyez-le ici pour être payé.",
-  },
-  { sender: "user", delay: 15, text: "4829" },
-  {
-    sender: "bot",
-    delay: 16.1,
-    text: "🔐 Code PIN reçu.\n\nVérification en cours.",
-  },
-  {
-    sender: "bot",
-    delay: 17.3,
-    text: "🎉 Paiement confirmé.\n\nCode PIN validé.\nVos fonds (117.00 USD) sont en route vers votre compte Mobile Money.",
-  },
-  {
-    sender: "bot",
-    delay: 18.4,
-    text:
-      "👏 Félicitations pour la vente de Smartphone Samsung A54 neuf.\n\nContinuez à vendre avec Clairtus pour des transactions toujours sécurisées.",
-  },
-];
-const ACHETEUR_CONVERSATION: ChatMessage[] = [
-  { sender: "user", delay: 0.5, text: "BONJOUR" },
-  {
-    sender: "bot",
-    delay: 1.5,
-    text:
-      "👋 Bonjour et bienvenue chez Clairtus.\n\nClairtus sécurise vos transactions entre acheteur et vendeur :\n• l'acheteur paie en sécurité\n• le vendeur est payé après confirmation\n• tout est tracé pour protéger les deux parties\n\nQue souhaitez-vous faire aujourd'hui ?\n[ VENDRE ]  [ ACHETER ]",
-  },
-  { sender: "user", delay: 3, text: "ACHETER" },
-  {
-    sender: "bot",
-    delay: 4,
-    text: "Parfait ✅\n\nDécrivez brièvement ce que vous achetez.\nExemple : MacBook Air M1 2020",
-  },
-  { sender: "user", delay: 5.2, text: "Smartphone Samsung A54 neuf" },
-  {
-    sender: "bot",
-    delay: 6.3,
-    text:
-      "Super 👍\n\nQuel est le prix en $ ?\nRépondez uniquement avec un nombre.\nExemple : 900\n\n💡 En tant qu'acheteur, vous payez les frais Mobile Money opérateur.",
-  },
-  { sender: "user", delay: 7.4, text: "120" },
-  {
-    sender: "bot",
-    delay: 8.5,
-    text:
-      "Parfait.\n\nEnvoyez maintenant le numéro du vendeur en format international.\nExemple : +243...\n\nLe numéro doit appartenir à la contrepartie et être valide pour Mobile Money.\nOpérateurs supportés : M-Pesa, Orange Money, Airtel Money.",
-  },
-  { sender: "user", delay: 9.8, text: "+243 89 000 0000" },
-  {
-    sender: "bot",
-    delay: 10.8,
-    text: "✅ Merci.\n\nNous lançons votre transaction sécurisée.",
-  },
-  {
-    sender: "bot",
-    delay: 12,
-    text:
-      "✅ Confirmation enregistrée.\n\nOuvrez ce lien pour sécuriser le paiement :\nhttps://pay.clairtus.app/checkout/txn-demo\n\n💡 Les frais Mobile Money opérateur restent à la charge de l'acheteur.",
-  },
-  {
-    sender: "bot",
-    delay: 13.6,
-    text:
-      "🔐 Paiement sécurisé.\n\nVoici votre code PIN de livraison : 4829\n\n⚠️ Ne partagez jamais ce code par téléphone.\nNe le donnez qu'au moment où vous recevez l'article.",
-  },
-  {
-    sender: "bot",
-    delay: 16,
-    text: "✅ Transaction terminée.\n\nLe vendeur a reçu son paiement.",
-  },
-  {
-    sender: "bot",
-    delay: 17.2,
-    text:
-      "🥳 Félicitations pour votre achat de Smartphone Samsung A54 neuf.\n\nContinuez à acheter avec Clairtus en toute confiance.",
-  },
-];
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) fetchDashboardData();
+      setLoading(false);
+    });
 
-const viewportOnce = { once: true as const, margin: "-12% 0px -12% 0px", amount: 0.25 };
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) fetchDashboardData();
+    });
 
-const glassCardClass =
-  "bg-white/[0.02] border border-white/5 rounded-2xl p-6 hover:bg-white/[0.04] hover:border-primary/30 transition-all duration-300 backdrop-blur-sm";
-const pageGutterClass = "px-2 sm:px-4 lg:px-6";
-const pageMaxWidthClass = "max-w-7xl";
+    return () => subscription.unsubscribe();
+  }, []);
 
-export default function Home() {
-  const prefersReducedMotion = useReducedMotion();
-  const transition = useMemo(
-    () =>
-      prefersReducedMotion
-        ? { duration: 0.01 }
-        : { duration: 0.55, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
-    [prefersReducedMotion],
-  );
+  const fetchDashboardData = async () => {
+    // Fetch transactions and users in parallel for speed
+    const [txResponse, usersResponse] = await Promise.all([
+      supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(20),
+      supabase.from("users").select("*")
+    ]);
 
-  const staggerContainer = useMemo(
-    () => ({
-      hidden: {},
-      visible: {
-        transition: {
-          staggerChildren: prefersReducedMotion ? 0 : 0.15,
-          delayChildren: prefersReducedMotion ? 0 : 0,
+    if (txResponse.data) setTransactions(txResponse.data);
+    
+    if (usersResponse.data) {
+      // Map users by phone number for instant lookup O(1)
+      const mappedUsers = usersResponse.data.reduce((acc: any, user: any) => {
+        acc[user.phone_number] = user;
+        return acc;
+      }, {});
+      setUserMap(mappedUsers);
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setError("Accès refusé. Identifiants incorrects.");
+    setLoading(false);
+  };
+
+  const handleAdminAction = async (txId: string, action: "FORCE_RELEASE" | "FORCE_REFUND") => {
+    if (!confirm(`Êtes-vous sûr de vouloir exécuter l'action : ${action} ?`)) return;
+    
+    setActionLoading(txId);
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/admin-actions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_ADMIN_SECRET}`
         },
-      },
-    }),
-    [prefersReducedMotion],
-  );
+        body: JSON.stringify({
+          action,
+          transaction_id: txId,
+          admin_note: "Action exécutée depuis le portail Admin web."
+        })
+      });
 
-  const staggerItem = useMemo(
-    () =>
-      prefersReducedMotion
-        ? {
-            hidden: { opacity: 1, y: 0 },
-            visible: {
-              opacity: 1,
-              y: 0,
-              transition: { duration: 0.01 },
-            },
-          }
-        : {
-            hidden: { opacity: 0, y: 28 },
-            visible: {
-              opacity: 1,
-              y: 0,
-              transition,
-            },
-          },
-    [prefersReducedMotion, transition],
-  );
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Action failed");
+      
+      alert(`Succès : ${result.message}`);
+      fetchDashboardData(); 
+    } catch (err: any) {
+      alert(`Erreur : ${err.message}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
-  const whatsappBotUrl = getWhatsAppBotUrl();
+  // Helper to render User with Trust Badge
+  const renderUserCell = (phone: string) => {
+    if (!phone) return <span className="text-gray-500">-</span>;
+    const user = userMap[phone];
+    if (!user) return <span className="font-mono text-sm">{phone}</span>;
 
-  const blobTransition = prefersReducedMotion
-    ? { duration: 0 }
-    : {
-        duration: 8,
-        repeat: Infinity,
-        ease: "easeInOut" as const,
-      };
+    const isTrusted = user.trust_score >= 60;
+    const isRisky = user.trust_score < 40;
+    
+    return (
+      <div className="flex flex-col space-y-1">
+        <span className="font-mono text-sm">{phone}</span>
+        <div className={`flex items-center w-fit px-2 py-0.5 rounded text-[10px] font-semibold border
+          ${isRisky ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
+            isTrusted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
+            'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}
+        >
+          {isRisky ? <UserX className="w-3 h-3 mr-1" /> : <ShieldCheck className="w-3 h-3 mr-1" />}
+          Score: {user.trust_score}
+        </div>
+      </div>
+    );
+  };
 
-  const blobAnimate = prefersReducedMotion
-    ? undefined
-    : {
-        scale: [1, 1.05, 1],
-        opacity: [0.3, 0.5, 0.3],
-      };
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">Chargement du système sécurisé...</div>;
 
+  // --- LOGIN SCREEN ---
+  if (!session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
+        <div className="max-w-md w-full bg-gray-900 rounded-xl shadow-2xl border border-gray-800 p-8">
+          <div className="flex flex-col items-center mb-8">
+            <div className="bg-emerald-500/10 p-4 rounded-full mb-4">
+              <ShieldAlert className="w-12 h-12 text-emerald-500" />
+            </div>
+            <h1 className="text-2xl font-bold text-white tracking-wider">CLAIRTUS COMMAND</h1>
+            <p className="text-gray-400 text-sm mt-2">Accès restreint à l'administration</p>
+          </div>
+          {error && <div className="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg text-sm mb-6 text-center">{error}</div>}
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-400 mb-2">Email Administrateur</label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none" required />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-400 mb-2">Mot de passe</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-white focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none" required />
+            </div>
+            <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 px-4 rounded-lg flex items-center justify-center transition-colors">
+              <Lock className="w-5 h-5 mr-2" />
+              Déverrouiller le portail
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- MAIN DASHBOARD ---
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[#020617] text-slate-50 antialiased">
-      <a
-        href="#contenu-principal"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
-      >
-        Aller au contenu
-      </a>
-
-      <header className="fixed top-0 z-50 w-full border-b border-white/10 bg-[#020617]/80 backdrop-blur-xl">
-        <div className={`mx-auto flex h-16 ${pageMaxWidthClass} items-center justify-between px-2`}>
-          <Image
-            src="/logo-clairtus.svg"
-            alt="Clairtus"
-            width={140}
-            height={28}
-            className="h-[42px] w-[110px]"
-            priority
-          />
-          <a
-            href={whatsappBotUrl}
-            className="rounded-full bg-primary px-4 py-2 text-sm font-semibold font-heading text-primary-foreground shadow-lg shadow-primary/25 transition-transform hover:scale-[1.02] active:scale-[0.98]"
-          >
-            {content.nav.apply}
-          </a>
+    <div className="min-h-screen bg-gray-950 text-gray-200 font-sans">
+      <header className="bg-gray-900 border-b border-gray-800 px-8 py-4 flex justify-between items-center sticky top-0 z-10">
+        <div className="flex items-center space-x-3">
+          <ShieldAlert className="w-8 h-8 text-emerald-500" />
+          <h1 className="text-xl font-bold text-white tracking-widest">CLAIRTUS <span className="text-emerald-500">COMMAND</span></h1>
+        </div>
+        <div className="flex items-center space-x-4">
+          <span className="text-sm text-gray-400">{session.user.email}</span>
+          <button onClick={() => supabase.auth.signOut()} className="flex items-center text-sm bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors">
+            <LogOut className="w-4 h-4 mr-2" /> Déconnexion
+          </button>
         </div>
       </header>
 
-      <main id="contenu-principal">
-        {/* —— Hero —— */}
-        <section
-          className={`relative flex min-h-[min(100dvh,920px)] flex-col justify-center ${pageGutterClass} pb-8 pt-28`}
-          aria-labelledby="hero-title"
-        >
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <motion.div
-              className="absolute left-1/2 top-[18%] h-[min(70vw,560px)] w-[min(120vw,980px)] -translate-x-1/2 rounded-full bg-[hsl(var(--primary)/0.22)] blur-[100px]"
-              aria-hidden
-              animate={blobAnimate}
-              transition={blobTransition}
-            />
-            <motion.div
-              className="absolute bottom-[5%] right-[-10%] h-[420px] w-[420px] rounded-full bg-[hsl(var(--primary)/0.12)] blur-[90px]"
-              aria-hidden
-              animate={blobAnimate}
-              transition={{ ...blobTransition, delay: prefersReducedMotion ? 0 : 1.6 }}
-            />
-            <motion.div
-              className="absolute left-[-15%] top-[40%] h-[320px] w-[320px] rounded-full bg-emerald-400/10 blur-[80px]"
-              aria-hidden
-              animate={blobAnimate}
-              transition={{ ...blobTransition, delay: prefersReducedMotion ? 0 : 3.2 }}
-            />
+      <main className="p-8 max-w-7xl mx-auto">
+        <div className="flex justify-between items-end mb-6">
+          <div>
+            <h2 className="text-2xl font-bold text-white mb-1">Radar des Transactions</h2>
+            <p className="text-sm text-gray-400">Surveillance en temps réel avec indicateur de confiance (Trust Score).</p>
           </div>
+          <button onClick={fetchDashboardData} className="flex items-center text-sm bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors border border-gray-700">
+            <RefreshCw className="w-4 h-4 mr-2" /> Rafraîchir
+          </button>
+        </div>
 
-          <div className={`relative mx-auto w-full ${pageMaxWidthClass}`}>
-            <div className="grid items-center gap-12 lg:grid-cols-2">
-              <div className="text-center lg:text-left">
-                <motion.div
-                  initial={prefersReducedMotion ? false : { opacity: 0, y: 28 }}
-                  animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-                  transition={transition}
-                >
-                  <p className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-sm font-semibold text-primary backdrop-blur-md">
-                    {content.hero.badge}
-                  </p>
-                </motion.div>
-
-                <motion.h1
-                  id="hero-title"
-                  className="mt-8 text-[clamp(2rem,6vw,3.75rem)] font-bold font-heading leading-[1.07] tracking-tight text-white"
-                  initial={prefersReducedMotion ? false : { opacity: 0, y: 32 }}
-                  animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-                  transition={{ ...transition, delay: prefersReducedMotion ? 0 : 0.06 }}
-                >
-                  {content.hero.title}
-                </motion.h1>
-
-                <motion.p
-                  className="mx-auto mt-8 max-w-2xl text-lg leading-relaxed text-white/[0.68] sm:text-xl lg:mx-0"
-                  initial={prefersReducedMotion ? false : { opacity: 0, y: 24 }}
-                  animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-                  transition={{ ...transition, delay: prefersReducedMotion ? 0 : 0.12 }}
-                >
-                  {content.hero.subtitle}
-                </motion.p>
-
-                <motion.div
-                  className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row lg:justify-start"
-                  initial={prefersReducedMotion ? false : { opacity: 0, y: 20 }}
-                  animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-                  transition={{ ...transition, delay: prefersReducedMotion ? 0 : 0.18 }}
-                >
-                  <a
-                    href={whatsappBotUrl}
-                    className="inline-flex min-h-[52px] min-w-[220px] items-center justify-center rounded-full bg-primary px-10 text-base font-semibold font-heading text-primary-foreground shadow-[0_0_52px_-8px_hsl(var(--primary)/0.85)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    {content.hero.primaryCta}
-                  </a>
-                  <a
-                    href="#etapes"
-                    className="inline-flex min-h-[52px] min-w-[220px] items-center justify-center rounded-full border border-white/20 bg-white/5 px-10 text-base font-semibold text-white backdrop-blur-md transition-colors hover:border-white/35 hover:bg-white/10"
-                  >
-                    {content.hero.secondaryCta}
-                  </a>
-                </motion.div>
-              </div>
-              <motion.div
-                className="text-left"
-                initial={prefersReducedMotion ? false : { opacity: 0, y: 32 }}
-                animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-                transition={{ ...transition, delay: prefersReducedMotion ? 0 : 0.22 }}
-              >
-                <InteractiveChatDemo prefersReducedMotion={!!prefersReducedMotion} />
-              </motion.div>
-            </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-gray-950/50 border-b border-gray-800 text-gray-400">
+                <tr>
+                  <th className="px-6 py-4 font-medium">Référence</th>
+                  <th className="px-6 py-4 font-medium">Vendeur</th>
+                  <th className="px-6 py-4 font-medium">Acheteur</th>
+                  <th className="px-6 py-4 font-medium">Montant</th>
+                  <th className="px-6 py-4 font-medium">Statut</th>
+                  <th className="px-6 py-4 font-medium text-right">Arbitrage (God Mode)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {transactions.length === 0 ? (
+                  <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">Aucune transaction trouvée.</td></tr>
+                ) : (
+                  transactions.map((tx) => (
+                    <tr key={tx.id} className="hover:bg-gray-800/50 transition-colors">
+                      <td className="px-6 py-4 font-mono text-emerald-400">{tx.reference}</td>
+                      <td className="px-6 py-4">{renderUserCell(tx.seller_phone)}</td>
+                      <td className="px-6 py-4">{renderUserCell(tx.buyer_phone)}</td>
+                      <td className="px-6 py-4 font-semibold text-white">
+                        {tx.base_amount ? `${tx.base_amount} ${tx.currency}` : "-"}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium flex w-fit items-center gap-1
+                          ${tx.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : ''}
+                          ${tx.status === 'FUNDED' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : ''}
+                          ${tx.status === 'DISPUTED' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : ''}
+                          ${tx.status === 'CANCELLED' || tx.status === 'REFUNDED' ? 'bg-gray-500/10 text-gray-400 border border-gray-500/20' : ''}
+                          ${['INITIATED', 'PENDING_FUNDING', 'DRAFT'].includes(tx.status) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : ''}
+                        `}>
+                          {tx.status === 'COMPLETED' && <CheckCircle className="w-3 h-3" />}
+                          {tx.status === 'DISPUTED' && <AlertTriangle className="w-3 h-3" />}
+                          {(tx.status === 'CANCELLED' || tx.status === 'REFUNDED') && <XCircle className="w-3 h-3" />}
+                          {tx.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right space-x-2">
+                        {(tx.status === "FUNDED" || tx.status === "DISPUTED") ? (
+                          <>
+                            <button
+                              onClick={() => handleAdminAction(tx.id, "FORCE_RELEASE")}
+                              disabled={actionLoading === tx.id}
+                              className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                              {actionLoading === tx.id ? "..." : "Payer Vendeur"}
+                            </button>
+                            <button
+                              onClick={() => handleAdminAction(tx.id, "FORCE_REFUND")}
+                              disabled={actionLoading === tx.id}
+                              className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-50"
+                            >
+                              {actionLoading === tx.id ? "..." : "Rembourser Acheteur"}
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-gray-600 text-xs italic">Verrouillé</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-
-          <div className="flex flex-col items-center justify-center pt-10 pb-20 opacity-70">
-            <p className="mb-6 px-2 text-center text-sm font-semibold text-gray-300 sm:px-4">
-              Vos fonds sont sécurisés par des partenaires de confiance en RDC
-            </p>
-            <div className="flex w-full max-w-3xl flex-wrap items-center justify-center gap-x-3 gap-y-3 px-2 pt-20 sm:gap-x-6 sm:gap-y-4 md:gap-8">
-              <div className="group flex h-14 w-[150px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-white/[0.08] sm:h-16 sm:w-[180px]">
-                <Image
-                  src="/logos/airtel.svg"
-                  alt="Airtel Money"
-                  width={140}
-                  height={40}
-                  className="h-6 w-auto object-contain transition-transform duration-300 group-hover:scale-105 sm:h-7"
-                />
-              </div>
-              <div className="group flex h-14 w-[150px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-white/[0.08] sm:h-16 sm:w-[180px]">
-                <Image
-                  src="/logos/orange.svg"
-                  alt="Orange Money"
-                  width={48}
-                  height={48}
-                  className="h-7 w-auto object-contain transition-transform duration-300 group-hover:scale-105 sm:h-8"
-                />
-              </div>
-              <div className="group flex h-14 w-[150px] items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-white/[0.08] sm:h-16 sm:w-[180px]">
-                <Image
-                  src="/logos/mpesa.svg"
-                  alt="M-Pesa"
-                  width={110}
-                  height={59}
-                  className="h-7 w-auto object-contain transition-transform duration-300 group-hover:scale-105 sm:h-8"
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* —— Stats —— */}
-        <section
-          id="stats-confiance"
-          className="border-y border-white/10 bg-white/[0.03]"
-          aria-labelledby="stats-heading"
-        >
-          <div className={`mx-auto grid ${pageMaxWidthClass} ${pageGutterClass} gap-12 py-20 sm:grid-cols-3 sm:gap-8`}>
-            <h2 id="stats-heading" className="sr-only">
-              Indicateurs de confiance
-            </h2>
-            <StatBlock
-              value={content.stats.rate}
-              label={content.stats.rateLabel}
-              prefersReducedMotion={!!prefersReducedMotion}
-              delay={0}
-              transition={transition}
-            />
-            <StatBlock
-              value={content.stats.salary}
-              label={content.stats.salaryLabel}
-              prefersReducedMotion={!!prefersReducedMotion}
-              delay={0.08}
-              transition={transition}
-            />
-            <StatBlock
-              value={content.stats.network}
-              label={content.stats.networkLabel}
-              prefersReducedMotion={!!prefersReducedMotion}
-              delay={0.16}
-              transition={transition}
-            />
-          </div>
-        </section>
-
-        {/* —— Features 2×2 —— */}
-        <section id="fonctionnalites" className={`${pageGutterClass} py-24`} aria-labelledby="features-heading">
-          <div className={`mx-auto ${pageMaxWidthClass}`}>
-            <motion.h2
-              id="features-heading"
-              className="mx-auto max-w-3xl text-center text-[clamp(1.75rem,4vw,2.5rem)] font-bold font-heading leading-tight tracking-tight text-white"
-              initial={prefersReducedMotion ? false : { opacity: 0, y: 28 }}
-              whileInView={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-              viewport={viewportOnce}
-              transition={transition}
-            >
-              {content.features.title}
-            </motion.h2>
-
-            <motion.p
-              className="mx-auto mt-4 max-w-2xl text-center text-lg text-white/65"
-              initial={prefersReducedMotion ? false : { opacity: 0 }}
-              whileInView={prefersReducedMotion ? undefined : { opacity: 1 }}
-              viewport={viewportOnce}
-              transition={{ ...transition, delay: 0.06 }}
-            >
-              {content.features.subtitle}
-            </motion.p>
-
-            <motion.div
-              className="mt-16 grid gap-6 sm:grid-cols-2"
-              variants={staggerContainer}
-              initial="hidden"
-              whileInView="visible"
-              viewport={viewportOnce}
-            >
-              {content.features.items.map((item, i) => (
-                <FeatureCard
-                  key={item.title}
-                  icon={FEATURE_ICONS[i]}
-                  title={item.title}
-                  description={item.description}
-                  variants={staggerItem}
-                />
-              ))}
-            </motion.div>
-          </div>
-        </section>
-
-        {/* —— How it works —— */}
-        <section
-          id="etapes"
-          className={`relative border-t border-white/10 ${pageGutterClass} py-24`}
-          aria-labelledby="how-heading"
-        >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,hsl(var(--primary)/0.12),transparent)]" />
-          <div className={`relative mx-auto ${pageMaxWidthClass}`}>
-            <motion.h2
-              id="how-heading"
-              className="mx-auto max-w-3xl text-center text-[clamp(1.75rem,4vw,2.35rem)] font-bold font-heading leading-tight tracking-tight text-white"
-              initial={prefersReducedMotion ? false : { opacity: 0, y: 28 }}
-              whileInView={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-              viewport={viewportOnce}
-              transition={transition}
-            >
-              {content.programs.title}
-            </motion.h2>
-            <motion.p
-              className="mx-auto mt-4 max-w-3xl text-center text-lg text-white/65"
-              initial={prefersReducedMotion ? false : { opacity: 0 }}
-              whileInView={prefersReducedMotion ? undefined : { opacity: 1 }}
-              viewport={viewportOnce}
-              transition={{ ...transition, delay: 0.06 }}
-            >
-              {content.programs.subtitle}
-            </motion.p>
-
-            <div className="relative mt-20">
-              <div
-                className="pointer-events-none absolute left-[8%] right-[8%] top-[76px] hidden h-px bg-gradient-to-r from-transparent via-white/15 to-transparent md:block"
-                aria-hidden
-              />
-              <motion.div
-                className="grid gap-12 md:grid-cols-3 md:gap-8"
-                variants={staggerContainer}
-                initial="hidden"
-                whileInView="visible"
-                viewport={viewportOnce}
-              >
-                {content.programs.items.map((item, i) => (
-                  <ProgramStep
-                    key={item.title}
-                    icon={PROGRAM_ICONS[i]}
-                    title={item.title}
-                    description={item.description}
-                    variants={staggerItem}
-                  />
-                ))}
-              </motion.div>
-            </div>
-          </div>
-        </section>
-
-        {/* —— Final CTA —— */}
-        <section
-          id="cta-finale"
-          className={`relative ${pageGutterClass} py-28`}
-          aria-labelledby="cta-heading"
-        >
-          <div className="pointer-events-none absolute inset-0">
-            <motion.div
-              className="absolute left-1/2 top-1/2 h-[420px] w-[min(100%,720px)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[hsl(var(--primary)/0.18)] blur-[100px]"
-              aria-hidden
-              animate={blobAnimate}
-              transition={blobTransition}
-            />
-          </div>
-          <motion.div
-            className="relative mx-auto max-w-3xl text-center"
-            initial={prefersReducedMotion ? false : { opacity: 0, y: 32 }}
-            whileInView={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-            viewport={viewportOnce}
-            transition={transition}
-          >
-            <h2
-              id="cta-heading"
-              className="text-[clamp(1.85rem,4.2vw,2.75rem)] font-bold font-heading leading-tight tracking-tight text-white"
-            >
-              {content.cta.title}
-            </h2>
-            <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/[0.68]">
-              {content.cta.subtitle}
-            </p>
-            <a
-              href={whatsappBotUrl}
-              className="relative mt-12 inline-flex min-h-[56px] min-w-[min(100%,300px)] items-center justify-center overflow-hidden rounded-full bg-primary px-12 text-lg font-semibold font-heading text-primary-foreground shadow-[0_0_60px_-10px_hsl(var(--primary)/0.9)] transition-transform hover:scale-[1.03] active:scale-[0.98]"
-            >
-              <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent motion-reduce:hidden" />
-              {content.cta.button}
-            </a>
-          </motion.div>
-        </section>
+        </div>
       </main>
-
-      <footer className="border-t border-white/10 bg-black/40 py-14 text-center backdrop-blur-sm">
-        <p className={`mx-auto max-w-2xl ${pageGutterClass} text-sm leading-relaxed text-slate-400`}>
-          {content.footer.description}
-        </p>
-        <p className="mt-3 text-xs text-slate-500">{content.footer.rights}</p>
-      </footer>
-    </div>
-  );
-}
-
-function StatBlock({
-  value,
-  label,
-  prefersReducedMotion,
-  delay,
-  transition,
-}: {
-  value: string;
-  label: string;
-  prefersReducedMotion: boolean;
-  delay: number;
-  transition: { duration: number; ease?: [number, number, number, number] };
-}) {
-  return (
-    <motion.div
-      className="text-center"
-      initial={prefersReducedMotion ? false : { opacity: 0, y: 24 }}
-      whileInView={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-      viewport={viewportOnce}
-      transition={{ ...transition, delay: prefersReducedMotion ? 0 : delay }}
-    >
-      <div className="text-5xl font-bold tabular-nums tracking-tight text-primary sm:text-6xl">
-        {value}
-      </div>
-      <div className="mt-3 text-[15px] font-medium text-slate-400">{label}</div>
-    </motion.div>
-  );
-}
-
-function FeatureCard({
-  icon: Icon,
-  title,
-  description,
-  variants,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  variants: {
-    hidden: { opacity: number; y: number };
-    visible: { opacity: number; y: number; transition?: object };
-  };
-}) {
-  return (
-    <motion.article variants={variants} className={`${glassCardClass} group relative overflow-hidden`}>
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-        <Icon size={24} strokeWidth={1.75} aria-hidden />
-      </div>
-      <h3 className="text-lg font-semibold font-heading leading-snug text-white sm:text-xl">{title}</h3>
-      <p className="mt-3 text-[15px] leading-relaxed text-white/[0.72]">{description}</p>
-    </motion.article>
-  );
-}
-
-function ProgramStep({
-  icon: Icon,
-  title,
-  description,
-  variants,
-}: {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  variants: {
-    hidden: { opacity: number; y: number };
-    visible: { opacity: number; y: number; transition?: object };
-  };
-}) {
-  return (
-    <motion.div
-      variants={variants}
-      className={`${glassCardClass} relative z-10 flex flex-col items-center text-center`}
-    >
-      <div className="mb-4 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
-        <Icon size={24} strokeWidth={1.75} aria-hidden />
-      </div>
-      <h3 className="text-lg font-semibold font-heading leading-snug text-white">{title}</h3>
-      <p className="mt-4 max-w-sm text-[15px] leading-relaxed text-white/[0.72]">{description}</p>
-    </motion.div>
-  );
-}
-
-function InteractiveChatDemo({ prefersReducedMotion }: { prefersReducedMotion: boolean }) {
-  const [view, setView] = useState<DemoView>("vendeur");
-  const [visibleCount, setVisibleCount] = useState(0);
-  const [typing, setTyping] = useState(false);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const messages = useMemo(
-    () => (view === "vendeur" ? VENDEUR_CONVERSATION : ACHETEUR_CONVERSATION),
-    [view],
-  );
-  const visibleMessages = messages.slice(0, visibleCount);
-
-  useEffect(() => {
-    const timeoutIds: number[] = [];
-    timeoutIds.push(
-      window.setTimeout(() => {
-        setVisibleCount(prefersReducedMotion ? messages.length : 0);
-        setTyping(false);
-      }, 0),
-    );
-
-    if (prefersReducedMotion) {
-      return () => {
-        timeoutIds.forEach((id) => window.clearTimeout(id));
-      };
-    }
-
-    messages.forEach((message, index) => {
-      const typingLead = estimateTypingLeadMs(message.text);
-      const typingDelay = Math.max(message.delay * 1000 - typingLead, 0);
-      const messageDelay = message.delay * 1000;
-
-      if (message.sender === "bot") {
-        timeoutIds.push(
-          window.setTimeout(() => {
-            setTyping(true);
-          }, typingDelay),
-        );
-      }
-
-      timeoutIds.push(
-        window.setTimeout(() => {
-          setVisibleCount(index + 1);
-          if (message.sender === "bot") {
-            setTyping(false);
-          }
-        }, messageDelay),
-      );
-    });
-
-    return () => {
-      timeoutIds.forEach((id) => window.clearTimeout(id));
-    };
-  }, [messages, prefersReducedMotion, view]);
-
-  useLayoutEffect(() => {
-    const scrollNode = scrollRef.current;
-    if (!scrollNode) {
-      return;
-    }
-
-    const rafId = window.requestAnimationFrame(() => {
-      const targetTop = Math.max(scrollNode.scrollHeight - scrollNode.clientHeight, 0);
-      scrollNode.scrollTo({
-        top: targetTop,
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-      });
-    });
-    return () => window.cancelAnimationFrame(rafId);
-  }, [prefersReducedMotion, typing, view, visibleCount]);
-
-  return (
-    <div className="mx-auto flex w-full max-w-[360px] flex-col items-center justify-start">
-      <div className="mb-5 inline-flex flex-wrap items-center justify-center rounded-full border border-white/10 bg-white/[0.04] p-1 backdrop-blur-md">
-        <button
-          type="button"
-          onClick={() => setView("vendeur")}
-          className={`relative rounded-full px-4 py-2 text-xs font-semibold transition-colors sm:text-sm ${
-            view === "vendeur" ? "text-primary-foreground" : "text-slate-300 hover:text-white"
-          }`}
-        >
-          {view === "vendeur" && (
-            <motion.span
-              layoutId="toggle-pill"
-              className="absolute inset-0 -z-10 rounded-full bg-primary shadow-lg shadow-primary/30"
-              transition={{ type: "spring", stiffness: 360, damping: 28 }}
-            />
-          )}
-          Vue Vendeur
-        </button>
-        <button
-          type="button"
-          onClick={() => setView("acheteur")}
-          className={`relative rounded-full px-4 py-2 text-xs font-semibold transition-colors sm:text-sm ${
-            view === "acheteur" ? "text-primary-foreground" : "text-slate-300 hover:text-white"
-          }`}
-        >
-          {view === "acheteur" && (
-            <motion.span
-              layoutId="toggle-pill"
-              className="absolute inset-0 -z-10 rounded-full bg-primary shadow-lg shadow-primary/30"
-              transition={{ type: "spring", stiffness: 360, damping: 28 }}
-            />
-          )}
-          Vue Acheteur
-        </button>
-      </div>
-
-      <div className="mx-auto w-full max-w-[320px] overflow-hidden rounded-3xl border-[6px] border-gray-800 bg-[#0b141a] shadow-2xl shadow-primary/20">
-        <div className="flex items-center justify-between border-b border-white/10 bg-[#202c33] px-4 py-3 text-sm font-medium text-slate-100">
-          <span className="truncate">🔒 Clairtus Bot</span>
-          <span className="text-[11px] text-emerald-300">en ligne</span>
-        </div>
-
-        <div
-          ref={scrollRef}
-          className="h-[420px] overflow-y-auto overscroll-y-contain bg-[#0b141a] px-3 py-3 touch-pan-y [scrollbar-color:#334155_transparent] [scrollbar-width:thin]"
-        >
-          <motion.div key={view} className="space-y-2.5">
-            {visibleMessages.map((message, index) => {
-              const isUser = message.sender === "user";
-              const textLength = message.text.length;
-              const enterDuration = isUser
-                ? 0.14
-                : Math.min(0.34, 0.16 + textLength * 0.0005);
-              return (
-                <motion.div
-                  key={`${view}-${index}`}
-                  layout
-                  className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-                  initial={prefersReducedMotion ? false : { opacity: 0, y: 12 }}
-                  animate={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }}
-                  transition={{
-                    duration: prefersReducedMotion ? 0.01 : enterDuration,
-                    ease: [0.22, 1, 0.36, 1],
-                  }}
-                >
-                  <div
-                    className={`relative max-w-[88%] rounded-2xl px-3 py-2 text-[11px] leading-relaxed sm:max-w-[86%] sm:text-xs ${
-                      isUser
-                        ? "rounded-br-md bg-[#005c4b] text-[#e9fef6]"
-                        : "rounded-bl-md bg-[#202c33] text-[#e9edef]"
-                    }`}
-                  >
-                    <span
-                      aria-hidden
-                      className={`absolute bottom-0 h-2.5 w-2.5 rotate-45 ${
-                        isUser ? "right-[-4px] bg-[#005c4b]" : "left-[-4px] bg-[#202c33]"
-                      }`}
-                    />
-                    <span className="relative whitespace-pre-line">{message.text}</span>
-                  </div>
-                </motion.div>
-              );
-            })}
-            {typing && (
-              <motion.div
-                className="flex justify-start"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18 }}
-              >
-                <div className="relative rounded-2xl rounded-bl-md bg-[#202c33] px-3 py-2">
-                  <span aria-hidden className="absolute bottom-0 left-[-4px] h-2.5 w-2.5 rotate-45 bg-[#202c33]" />
-                  <div className="flex items-center gap-1.5">
-                    <motion.span
-                      className="h-1.5 w-1.5 rounded-full bg-slate-300/80"
-                      animate={{ opacity: [0.35, 1, 0.35] }}
-                      transition={{ duration: 0.9, repeat: Infinity, delay: 0 }}
-                    />
-                    <motion.span
-                      className="h-1.5 w-1.5 rounded-full bg-slate-300/80"
-                      animate={{ opacity: [0.35, 1, 0.35] }}
-                      transition={{ duration: 0.9, repeat: Infinity, delay: 0.15 }}
-                    />
-                    <motion.span
-                      className="h-1.5 w-1.5 rounded-full bg-slate-300/80"
-                      animate={{ opacity: [0.35, 1, 0.35] }}
-                      transition={{ duration: 0.9, repeat: Infinity, delay: 0.3 }}
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </motion.div>
-        </div>
-      </div>
     </div>
   );
 }
