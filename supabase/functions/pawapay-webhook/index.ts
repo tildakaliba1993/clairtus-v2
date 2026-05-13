@@ -26,17 +26,36 @@ Deno.serve(async (req: Request) => {
             const { data: tx, error: txError } = await supabase.from("transactions").select("*").eq("pawapay_deposit_id", depositId).single();
             if (txError || !tx) return new Response("Transaction Not Found", { status: 404 });
 
-            // 🛡️ IDEMPOTENCY CHECK: Prevent Double-Processing
+            // 🛡️ IDEMPOTENCY CHECK
             if (tx.status === "FUNDED" || tx.status === "COMPLETED" || tx.status === "DISPUTED" || tx.status === "REFUNDED") {
                 console.log(`🛡️ [IDEMPOTENCY] Deposit ${depositId} already processed (Status is ${tx.status}). Ignoring duplicate webhook.`);
                 return new Response("Already Processed", { status: 200 });
+            }
+
+            // 🧟 EDGE CASE 1: ZOMBIE PAYMENT PROTECTION
+            // If the payment completes but we already cancelled the transaction due to timeout
+            if (tx.status === "CANCELLED" && status === "COMPLETED") {
+                console.warn(`🧟 [ZOMBIE PAYMENT] Payment arrived for CANCELLED transaction ${tx.reference}. Moving to DISPUTED.`);
+                
+                const { error: zombieError } = await supabase
+                    .from("transactions")
+                    .update({ status: "DISPUTED" })
+                    .eq("id", tx.id);
+
+                if (zombieError) {
+                    console.error("🚨 [ZOMBIE ERROR] Failed to flip cancelled tx to DISPUTED:", zombieError);
+                    return new Response("Internal Error", { status: 500 });
+                }
+
+                // Note: We do NOT send a PIN here because the transaction was technically closed.
+                // You will handle this manually via the Admin Portal later.
+                return new Response("Zombie Payment Flagged", { status: 200 });
             }
 
             if (status === "COMPLETED") {
                 console.log(`✅ Deposit COMPLETED for TX: ${tx.reference}. Committing to Database...`);
                 const generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
                 
-                // 🚨 STRICT DB UPDATE: We force it to return the updated row, or throw an error
                 const { data: updatedTx, error: updateError } = await supabase
                     .from("transactions")
                     .update({ status: "FUNDED", pin_code: generatedPin })
@@ -63,7 +82,7 @@ Deno.serve(async (req: Request) => {
             return new Response("Deposit Webhook Processed", { status: 200 });
         }
 
-        // 🟢 SCENARIO 2: IT IS A PAYOUT WEBHOOK (Simplified for Idempotency check)
+        // 🟢 SCENARIO 2: IT IS A PAYOUT WEBHOOK
         else if (body.payoutId) {
             const payoutId = body.payoutId;
             const { data: tx, error: txError } = await supabase.from("transactions").select("*").eq("pawapay_payout_id", payoutId).single();

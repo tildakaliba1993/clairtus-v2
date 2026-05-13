@@ -36,9 +36,25 @@ export async function processMessage(phone: string, text: string) {
             return;
         }
 
-        // 🚨 THE GLOBAL CANCEL & REFUND TRAP
+        // 🚨 GLOBAL COMMAND TRAPS
         const isCancelCommand = ["ANNULER", "CMD_ANNULER", "REFUSER", "CMD_REFUSER"].includes(cleanText.toUpperCase());
+        const isPinRecoveryCommand = ["CODE", "PIN", "RECUPERER", "RÉCUPÉRER"].includes(cleanText.toUpperCase());
         const isRegistrationState = ["AWAITING_TC", "AWAITING_FIRST_NAME", "AWAITING_LAST_NAME"].includes(session.current_state);
+
+        // 🛡️ EDGE CASE 4: PIN RECOVERY
+        if (isPinRecoveryCommand && !isRegistrationState) {
+            const { data: activePinTx } = await supabase.from("transactions")
+                .select("*")
+                .eq('buyer_phone', phone)
+                .eq('status', 'FUNDED')
+                .order('created_at', { ascending: false })
+                .limit(1).single();
+
+            if (activePinTx) {
+                console.log(`[PIN Recovery] Sent code to buyer ${phone} for TX ${activePinTx.reference}`);
+                return await sendWhatsAppText(phone, `🔑 *Rappel de votre Code PIN*\n\nPour la transaction *${activePinTx.item_description}*.\n\nVotre code PIN est : *${activePinTx.pin_code}*\n\nNe donnez ce code au vendeur *qu'après* avoir reçu et vérifié votre marchandise.`);
+            }
+        }
 
         if (isCancelCommand && !isRegistrationState) {
             console.log(`[Global Cancel] Triggered by ${phone}`);
@@ -135,6 +151,23 @@ export async function processMessage(phone: string, text: string) {
                         { id: "CMD_TRANSACTIONS", title: "📜 HISTORIQUE" }
                     ]);
                 } else if (cleanText === "CMD_VENDRE" || cleanText.toUpperCase() === "VENDRE") {
+                    // 🛡️ EDGE CASE 2: CHECK FOR STALE TRANSACTIONS
+                    const { data: staleTx } = await supabase
+                        .from("transactions")
+                        .select("id, reference")
+                        .eq("seller_phone", phone)
+                        .in("status", ["DRAFT", "INITIATED", "PENDING_FUNDING"])
+                        .order('created_at', { ascending: false })
+                        .limit(1).single();
+
+                    if (staleTx) {
+                        await supabase.from("sessions").update({ current_state: "CONFIRM_CANCEL_OLD", draft_transaction_id: staleTx.id }).eq("phone_number", phone);
+                        return await sendWhatsAppButtons(phone, `⚠️ Vous avez déjà une transaction en attente (${staleTx.reference}).\n\nVoulez-vous l'ANNULER pour en commencer une nouvelle ?`, [
+                            { id: "CMD_OUI_CANCEL_OLD", title: "✅ OUI (ANNULER)" },
+                            { id: "CMD_NON_CANCEL_OLD", title: "❌ NON (GARDER)" }
+                        ]);
+                    }
+
                     await supabase.from("sessions").update({ current_state: "AWAITING_ITEM_DESCRIPTION_SELL" }).eq("phone_number", phone);
                     await sendWhatsAppText(phone, MESSAGES.SELL_ITEM_REQUEST);
                 } else if (cleanText === "CMD_ACHETER" || cleanText.toUpperCase() === "ACHETER") {
@@ -157,6 +190,17 @@ export async function processMessage(phone: string, text: string) {
                     }
                 } else {
                     await sendWhatsAppText(phone, MESSAGES.UNKNOWN_MESSAGE);
+                }
+                break;
+
+            case "CONFIRM_CANCEL_OLD":
+                if (cleanText === "CMD_OUI_CANCEL_OLD" || cleanText.toUpperCase() === "OUI") {
+                    await supabase.from("transactions").update({ status: "CANCELLED" }).eq("id", session.draft_transaction_id);
+                    await supabase.from("sessions").update({ current_state: "AWAITING_ITEM_DESCRIPTION_SELL", draft_transaction_id: null }).eq("phone_number", phone);
+                    await sendWhatsAppText(phone, "✅ Ancienne transaction annulée.\n\n" + MESSAGES.SELL_ITEM_REQUEST);
+                } else {
+                    await supabase.from("sessions").update({ current_state: "MAIN_MENU" }).eq("phone_number", phone);
+                    await sendWhatsAppText(phone, "Entendu. L'ancienne transaction reste active. Tapez BONJOUR pour revenir au menu.");
                 }
                 break;
 
@@ -355,7 +399,6 @@ export async function processMessage(phone: string, text: string) {
 
                 const enteredPin = cleanText.replace(/\D/g, '');
                 
-                // 🛡️ FRAUD PREVENTION: 3-Strikes PIN Lockout Logic
                 if (enteredPin === txFunded.pin_code && enteredPin.length === 4) {
                     try {
                         const payoutId = crypto.randomUUID();
@@ -372,21 +415,14 @@ export async function processMessage(phone: string, text: string) {
                         await sendWhatsAppText(phone, "❌ Erreur technique. L'opérateur a rejeté le dépôt (Vérifiez le plafond de votre compte).");
                     }
                 } else {
-                    // PIN is WRONG. Calculate strikes.
                     const newAttempts = (txFunded.pin_attempts || 0) + 1;
 
                     if (newAttempts >= 3) {
-                        // STRIKE 3: Lockdown the transaction
                         await supabase.from("transactions").update({ status: "DISPUTED", pin_attempts: newAttempts }).eq("id", txFunded.id);
                         await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
-                        
-                        // Notify Scamming Seller
                         await sendWhatsAppText(phone, `🚨 *ALERTE DE SÉCURITÉ*\n\nVous avez saisi un code PIN incorrect 3 fois. La transaction est maintenant bloquée et en statut LITIGE.\n\nNos agents de conformité vont examiner ce dossier.`);
-                        
-                        // Notify Victim Buyer
                         await sendWhatsAppText(txFunded.buyer_phone, `🚨 *ALERTE DE SÉCURITÉ*\n\nLe vendeur a tenté de deviner votre code PIN 3 fois. La transaction a été immédiatement gelée pour protéger vos fonds.\n\nUn agent Clairtus va vous contacter sous peu.`);
                     } else {
-                        // STRIKE 1 or 2: Warning
                         await supabase.from("transactions").update({ pin_attempts: newAttempts }).eq("id", txFunded.id);
                         await sendWhatsAppText(phone, `❌ Code PIN incorrect.\n\n⚠️ *ATTENTION :* Il vous reste ${3 - newAttempts} tentative(s) avant le blocage définitif de la transaction pour fraude.`);
                     }
@@ -447,10 +483,8 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
     await supabase.from("transactions").update({ status: "PENDING_FUNDING" }).eq("id", tx.id);
     
-    // Determine who the actual buyer is
     const isAcceptingUserTheBuyer = acceptingPhone === tx.buyer_phone;
     
-    // 📡 DYNAMIC NETWORK WARNING LOGIC
     const netName = getNetworkName(tx.buyer_phone);
     const fifteenMinsAgo = new Date(Date.now() - 15 * 60000).toISOString();
     
@@ -460,9 +494,15 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
         .gte("created_at", fifteenMinsAgo);
 
     let warning = "";
-    // If the network had 2 or more failures in the last 15 minutes, trigger the warning
     if (count !== null && count >= 2) {
         warning = `\n\n⚠️ *ALERTE RÉSEAU :* Nous détectons actuellement des instabilités chez ${netName}. Le paiement peut nécessiter d'appuyer sur RÉESSAYER en cas d'échec du premier essai.`;
+    }
+
+    // 🛡️ EDGE CASE 3: FX TRANSPARENCY DISCLAIMER
+    // If currency is USD, warn about operator conversion to CDF
+    let currencyWarning = "";
+    if (tx.currency === "USD") {
+        currencyWarning = `\n\n💡 *Note :* Si votre compte est en CDF, votre opérateur appliquera son propre taux de change pour atteindre le montant en USD.`;
     }
 
     if (isAcceptingUserTheBuyer) {
@@ -470,7 +510,7 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
         await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_SELLER" }).eq("phone_number", tx.seller_phone);
         
         await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", acceptingPhone);
-        await sendWhatsAppButtons(acceptingPhone, MESSAGES.PRE_PAYMENT_BUYER + warning, [
+        await sendWhatsAppButtons(acceptingPhone, MESSAGES.PRE_PAYMENT_BUYER + currencyWarning + warning, [
             { id: "CMD_PAYER", title: "💳 PAYER" },
             { id: "CMD_ANNULER", title: "❌ ANNULER" }
         ]);
@@ -479,7 +519,7 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
         await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_SELLER" }).eq("phone_number", acceptingPhone);
         
         await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", tx.buyer_phone);
-        await sendWhatsAppButtons(tx.buyer_phone, MESSAGES.PRE_PAYMENT_BUYER + warning, [
+        await sendWhatsAppButtons(tx.buyer_phone, MESSAGES.PRE_PAYMENT_BUYER + currencyWarning + warning, [
             { id: "CMD_PAYER", title: "💳 PAYER" },
             { id: "CMD_ANNULER", title: "❌ ANNULER" }
         ]);
