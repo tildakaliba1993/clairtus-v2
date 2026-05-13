@@ -36,19 +36,28 @@ Deno.serve(async (req: Request) => {
     console.log(`⚠️ [CLAIRTUS SWEEPER] Found ${abandonedTxs.length} abandoned transactions. Cleaning up...`);
 
     for (const tx of abandonedTxs) {
-      // 1. Mark transaction as cancelled
-      await supabase.from("transactions").update({ status: "CANCELLED" }).eq("id", tx.id);
+      // 🛡️ INNER TRY/CATCH: Ensures one failed row doesn't break the entire sweep
+      try {
+        // 1. Mark transaction as cancelled
+        await supabase.from("transactions").update({ status: "CANCELLED" }).eq("id", tx.id);
 
-      // 2. Free the Seller's session and notify them
-      if (tx.seller_phone) {
-        await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", tx.seller_phone);
-        await sendWhatsAppText(tx.seller_phone, `🚫 *Expiration du délai*\n\nLa transaction ${tx.reference} a expiré (plus de 24h sans action). Le dossier a été automatiquement fermé.\n\nTapez BONJOUR pour revenir au menu.`);
-      }
+        const alertMessage = `🚫 *Expiration du délai*\n\nLa transaction ${tx.reference} a expiré (plus de 24h sans action). Le dossier a été automatiquement fermé.\n\nTapez BONJOUR pour revenir au menu.`;
 
-      // 3. Free the Buyer's session and notify them
-      if (tx.buyer_phone && tx.buyer_phone !== tx.seller_phone) {
-        await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", tx.buyer_phone);
-        await sendWhatsAppText(tx.buyer_phone, `🚫 *Expiration du délai*\n\nLa transaction ${tx.reference} a expiré (plus de 24h sans action). Le dossier a été automatiquement fermé.\n\nTapez BONJOUR pour revenir au menu.`);
+        // 2. Free the Seller's session and notify them
+        if (tx.seller_phone) {
+          await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", tx.seller_phone);
+          await sendWhatsAppText(tx.seller_phone, alertMessage);
+        }
+
+        // 3. Free the Buyer's session and notify them
+        if (tx.buyer_phone && tx.buyer_phone !== tx.seller_phone) {
+          await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", tx.buyer_phone);
+          await sendWhatsAppText(tx.buyer_phone, alertMessage);
+        }
+
+        console.log(`✅ [CLAIRTUS SWEEPER] Successfully cancelled and cleared TX: ${tx.reference}`);
+      } catch (innerError) {
+        console.error(`❌ [CLAIRTUS SWEEPER] Failed to process TX ${tx.reference}:`, innerError);
       }
     }
 

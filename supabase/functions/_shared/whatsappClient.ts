@@ -1,73 +1,105 @@
 // supabase/functions/_shared/whatsappClient.ts
 
-export async function sendWhatsAppText(to: string, bodyText: string) {
-  const token = Deno.env.get("WHATSAPP_TOKEN");
-  const phoneId = Deno.env.get("WHATSAPP_PHONE_ID");
+const WHATSAPP_API_URL = `https://graph.facebook.com/v22.0/${Deno.env.get("WHATSAPP_PHONE_ID")}/messages`;
+const WHATSAPP_TOKEN = Deno.env.get("WHATSAPP_TOKEN");
 
-  if (!token || !phoneId) throw new Error("Missing WhatsApp credentials in Supabase Vault.");
+export async function sendWhatsAppText(to: string, text: string) {
+    try {
+        console.log(`[WhatsApp API] Attempting to send free-form text to ${to}...`);
+        
+        const payload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: to,
+            type: "text",
+            text: { body: text }
+        };
 
-  const payload = { messaging_product: "whatsapp", to: to, type: "text", text: { body: bodyText } };
+        const response = await fetch(WHATSAPP_API_URL, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
 
-  const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  
-  const result = await response.json();
-  console.log(`[Meta Raw Text Response for ${to}]:`, JSON.stringify(result));
-  if (result.error) console.error("❌ Meta API Error (Text):", JSON.stringify(result.error));
-  return result;
+        const data = await response.json();
+        
+        // 🚨 Check for Meta's specific "Outside 24-hour window" error
+        if (data.error && data.error.code === 131047) {
+            console.warn(`⚠️ [WhatsApp API] 24h window closed for ${to}. Falling back to utility template.`);
+            return await sendWhatsAppTemplate(to, "clairtus_update", ["Mise à jour de votre transaction.", "Ouvrez ce message pour actualiser votre session."]);
+        }
+        
+        if (!response.ok) throw new Error(`WhatsApp API Error: ${response.statusText}`);
+        
+        console.log(`✅ [WhatsApp API] Text sent successfully to ${to}`);
+        return data;
+    } catch (error) {
+        console.error(`🚨 [WhatsApp API] Critical Error sending text to ${to}:`, error);
+        throw error;
+    }
 }
 
 export async function sendWhatsAppButtons(to: string, bodyText: string, buttons: { id: string, title: string }[]) {
-  const token = Deno.env.get("WHATSAPP_TOKEN");
-  const phoneId = Deno.env.get("WHATSAPP_PHONE_ID");
+    try {
+        const payload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: to,
+            type: "interactive",
+            interactive: {
+                type: "button",
+                body: { text: bodyText },
+                action: { buttons: buttons.map(b => ({ type: "reply", reply: { id: b.id, title: b.title } })) }
+            }
+        };
 
-  if (!token || !phoneId) throw new Error("Missing WhatsApp credentials in Supabase Vault.");
+        const response = await fetch(WHATSAPP_API_URL, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
 
-  const payload = {
-    messaging_product: "whatsapp", to: to, type: "interactive",
-    interactive: {
-      type: "button", body: { text: bodyText },
-      action: { buttons: buttons.map(btn => ({ type: "reply", reply: { id: btn.id, title: btn.title } })) }
+        const data = await response.json();
+        
+        // 🚨 Check for Meta's specific "Outside 24-hour window" error
+        if (data.error && data.error.code === 131047) {
+             console.warn(`⚠️ [WhatsApp API] 24h window closed for buttons to ${to}. Falling back to template.`);
+             return await sendWhatsAppTemplate(to, "clairtus_update", ["Mise à jour requise.", "Répondez BONJOUR pour continuer."]);
+        }
+
+        if (!response.ok) throw new Error(`WhatsApp API Error: ${response.statusText}`);
+        return data;
+    } catch (error) {
+        console.error(`🚨 [WhatsApp API] Critical Error sending buttons to ${to}:`, error);
+        throw error;
     }
-  };
-
-  const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  
-  const result = await response.json();
-  console.log(`[Meta Raw Button Response for ${to}]:`, JSON.stringify(result));
-  if (result.error) console.error("❌ Meta API Error (Buttons):", JSON.stringify(result.error));
-  return result;
 }
 
-export async function sendWhatsAppTemplate(to: string, templateName: string, bodyVariables: string[]) {
-  const token = Deno.env.get("WHATSAPP_TOKEN");
-  const phoneId = Deno.env.get("WHATSAPP_PHONE_ID");
+export async function sendWhatsAppTemplate(to: string, templateName: string, textVariables: string[]) {
+    try {
+        const parameters = textVariables.map(text => ({ type: "text", text: text }));
+        const payload = {
+            messaging_product: "whatsapp",
+            to: to,
+            type: "template",
+            template: { name: templateName, language: { code: "fr" }, components: [{ type: "body", parameters: parameters }] }
+        };
 
-  if (!token || !phoneId) throw new Error("Missing WhatsApp credentials in Supabase Vault.");
+        const response = await fetch(WHATSAPP_API_URL, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
 
-  const payload = {
-    messaging_product: "whatsapp", to: to, type: "template",
-    template: {
-      name: templateName, language: { code: "fr" },
-      components: [ { type: "body", parameters: bodyVariables.map(val => ({ type: "text", text: String(val) })) } ]
+        const data = await response.json();
+        if (!response.ok) {
+            console.error(`❌ [WhatsApp API] Failed to send template:`, JSON.stringify(data));
+            throw new Error(`WhatsApp API Error: ${response.statusText}`);
+        }
+        console.log(`✅ [WhatsApp API] Template sent successfully to ${to}`);
+        return data;
+    } catch (error) {
+         console.error(`🚨 [WhatsApp API] Critical Error sending template to ${to}:`, error);
+         throw error;
     }
-  };
-
-  const response = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  
-  const result = await response.json();
-  console.log(`[Meta Raw Template Response for ${to}]:`, JSON.stringify(result));
-  if (result.error) console.error("❌ Meta API Error (Template):", JSON.stringify(result.error));
-  return result;
 }
