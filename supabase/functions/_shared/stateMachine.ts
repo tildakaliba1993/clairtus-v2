@@ -3,7 +3,7 @@
 import { getSupabaseClient } from "./supabaseClient.ts";
 import { sendWhatsAppText, sendWhatsAppButtons, sendWhatsAppTemplate } from "./whatsappClient.ts";
 import { MESSAGES } from "./whatsappMessaging.ts";
-import { initiatePawaPayPayout } from "./pawapayClient.ts"; 
+import { initiatePawaPayPayout, initiatePawaPayDeposit } from "./pawapayClient.ts"; 
 
 const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 2.5% de frais sur la vente.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n\nEn continuant, vous acceptez ces conditions.";
 
@@ -35,6 +35,8 @@ export async function processMessage(phone: string, text: string) {
             ]);
             return;
         }
+
+        if (user.kyc_level === "BANNED") return;
 
         // 🚨 GLOBAL COMMAND TRAPS
         const isCancelCommand = ["ANNULER", "CMD_ANNULER", "REFUSER", "CMD_REFUSER"].includes(cleanText.toUpperCase());
@@ -81,7 +83,7 @@ export async function processMessage(phone: string, text: string) {
                         try {
                             const refundId = crypto.randomUUID();
                             await initiatePawaPayPayout(refundId, txToCancel.buyer_phone, txToCancel.base_amount, txToCancel.currency);
-                            await supabase.from("transactions").update({ status: "REFUNDED" }).eq("id", txToCancel.id);
+                            await supabase.from("transactions").update({ status: "REFUNDED", pawapay_refund_id: refundId }).eq("id", txToCancel.id);
                             await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
                             await sendWhatsAppText(phone, "☑️ Le contrat a été annulé et les fonds ont été retournés à l'acheteur.");
                             await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", txToCancel.buyer_phone);
@@ -94,9 +96,15 @@ export async function processMessage(phone: string, text: string) {
                     } else if (phone === txToCancel.buyer_phone) {
                         await supabase.from("transactions").update({ status: "CANCELLATION_REQUESTED" }).eq("id", txToCancel.id);
                         await sendWhatsAppText(phone, "⏳ Votre demande d'annulation a été envoyée au vendeur. Les fonds restent sécurisés jusqu'à son approbation.");
+                        
+                        await supabase.from("sessions").update({ 
+                            current_state: "AWAITING_CANCELLATION_APPROVAL", 
+                            draft_transaction_id: txToCancel.id 
+                        }).eq("phone_number", txToCancel.seller_phone);
+
                         await sendWhatsAppButtons(txToCancel.seller_phone, `🚨 L'acheteur demande l'annulation de la transaction ${txToCancel.reference}.\n\nAcceptez-vous d'annuler et de rembourser l'acheteur ?`, [
-                            { id: "CMD_ACCEPTER_ANNULATION", title: "✅ ACCEPTER (Rembourser)" },
-                            { id: "CMD_LITIGE", title: "❌ REFUSER (LITIGE)" }
+                            { id: "CMD_ACCEPTER_ANNULATION", title: "✅ REMBOURSER" },
+                            { id: "CMD_LITIGE", title: "❌ LITIGE" }
                         ]);
                         return;
                     }
@@ -170,6 +178,12 @@ export async function processMessage(phone: string, text: string) {
                     await supabase.from("sessions").update({ current_state: "AWAITING_ITEM_DESCRIPTION_SELL" }).eq("phone_number", phone);
                     await sendWhatsAppText(phone, MESSAGES.SELL_ITEM_REQUEST);
                 } else if (cleanText === "CMD_ACHETER" || cleanText.toUpperCase() === "ACHETER") {
+                    
+                    // 🔧 AIRTEL BYPASS: Prevent Airtel users from initiating a Buy transaction
+                    if (getNetworkName(phone) === "Airtel") {
+                        return await sendWhatsAppText(phone, "❌ Les paiements via Airtel sont temporairement suspendus. En tant qu'acheteur, veuillez utiliser un compte WhatsApp lié à un numéro M-Pesa ou Orange.");
+                    }
+
                     await supabase.from("sessions").update({ current_state: "AWAITING_ITEM_DESCRIPTION_BUY" }).eq("phone_number", phone);
                     await sendWhatsAppText(phone, MESSAGES.BUY_ITEM_REQUEST);
                 } else if (cleanText === "CMD_TRANSACTIONS" || cleanText.toUpperCase() === "HISTORIQUE") {
@@ -253,7 +267,9 @@ export async function processMessage(phone: string, text: string) {
                 
                 const { data: tx } = await supabase.from("transactions").update({ base_amount: priceSell }).eq("id", session.draft_transaction_id).select().single();
                 await supabase.from("sessions").update({ current_state: "AWAITING_COUNTERPARTY_PHONE_SELL" }).eq("phone_number", phone);
-                await sendWhatsAppText(phone, MESSAGES.COUNTERPARTY_PHONE_REQUEST_SELL(priceSell, tx.currency));
+                
+                // 🔧 AIRTEL BYPASS: Inform the seller to not use Airtel numbers for buyers
+                await sendWhatsAppText(phone, MESSAGES.COUNTERPARTY_PHONE_REQUEST_SELL(priceSell, tx.currency) + "\n\n⚠️ *Veuillez utiliser un numéro M-Pesa ou Orange (Airtel indisponible pour les paiements actuellement).*");
                 break;
             }
 
@@ -273,6 +289,11 @@ export async function processMessage(phone: string, text: string) {
                 if (!/^\d{10,15}$/.test(counterpartyPhone)) return await sendWhatsAppText(phone, MESSAGES.PHONE_INVALID);
                 if (counterpartyPhone === phone) return await sendWhatsAppText(phone, MESSAGES.SELF_TRANSACTION_BLOCKED);
                 
+                // 🔧 AIRTEL BYPASS: Hard block if seller tries to input an Airtel buyer
+                if (getNetworkName(counterpartyPhone) === "Airtel") {
+                    return await sendWhatsAppText(phone, "❌ L'acheteur ne peut pas utiliser Airtel pour payer. Veuillez fournir un numéro M-Pesa ou Orange.");
+                }
+
                 const { data: txSell } = await supabase.from("transactions").update({ buyer_phone: counterpartyPhone, status: "INITIATED" }).eq("id", session.draft_transaction_id).select().single();
                 await supabase.from("sessions").update({ current_state: "INITIATED_SELLER" }).eq("phone_number", phone);
                 await sendWhatsAppText(phone, MESSAGES.SELLER_WAITING_FOR_BUYER);
@@ -308,6 +329,12 @@ export async function processMessage(phone: string, text: string) {
             case "INVITED_BUYER":
             case "INVITED_SELLER":
                 if (cleanText === "CMD_ACCEPTER" || cleanText.toUpperCase() === "ACCEPTER") {
+                    
+                    // 🔧 AIRTEL BYPASS: Hard block if an Airtel user tries to accept an invitation to act as a buyer
+                    if (session.current_state === "INVITED_BUYER" && getNetworkName(phone) === "Airtel") {
+                        return await sendWhatsAppText(phone, "❌ Les paiements via Airtel sont temporairement suspendus. Vous ne pouvez pas accepter et payer cette transaction avec un numéro Airtel.");
+                    }
+
                     if (!user.first_name || !user.last_name) {
                         await supabase.from("sessions").update({ current_state: "AWAITING_TC_INVITED" }).eq("phone_number", phone);
                         await sendWhatsAppButtons(phone, TC_MESSAGE, [
@@ -354,22 +381,18 @@ export async function processMessage(phone: string, text: string) {
                 break;
 
             case "AWAITING_PAYMENT_BUYER":
-                if (cleanText === "CMD_PAYER" || cleanText.toUpperCase() === "PAYER" || cleanText === "CMD_RÉESSAYER" || cleanText.toUpperCase() === "RÉESSAYER") {
+                if (cleanText === "CMD_PAYER" || cleanText.toUpperCase() === "PAYER" || cleanText === "CMD_RÉESSAYER" || cleanText.toUpperCase() === "RÉESSAYER" || cleanText.toUpperCase() === "REESSAYER") {
                     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
                     await sendWhatsAppText(phone, MESSAGES.DEPOSIT_INITIATED);
                     
                     try {
-                        await supabase.from("payment_queue").insert({
-                            transaction_id: tx.id,
-                            phone_number: phone,
-                            amount: tx.base_amount,
-                            currency: tx.currency
-                        });
-                        
+                        const newDepositId = crypto.randomUUID();
+                        await supabase.from("transactions").update({ pawapay_deposit_id: newDepositId }).eq("id", tx.id);
+                        await initiatePawaPayDeposit(newDepositId, phone, tx.base_amount, tx.currency);
                         await supabase.from("sessions").update({ current_state: "AWAITING_DEPOSIT_CONFIRMATION" }).eq("phone_number", phone);
                     } catch (error) {
-                        console.error("Queue Insert Error:", error);
-                        await sendWhatsAppText(phone, MESSAGES.DEPOSIT_ERROR);
+                        console.error("Payment Initiation Error:", error);
+                        await sendWhatsAppText(phone, "❌ Erreur de réseau avec l'opérateur. Veuillez répondre REESSAYER pour tenter à nouveau.");
                     }
                 } else {
                     await sendWhatsAppText(phone, MESSAGES.UNKNOWN_MESSAGE);
@@ -377,7 +400,19 @@ export async function processMessage(phone: string, text: string) {
                 break;
 
             case "AWAITING_DEPOSIT_CONFIRMATION":
-                await sendWhatsAppText(phone, "⏳ Votre paiement est toujours en cours de traitement par l'opérateur Mobile Money.");
+                if (cleanText.toUpperCase() === "REESSAYER" || cleanText.toUpperCase() === "RÉESSAYER") {
+                    const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
+                    const newDepositId = crypto.randomUUID();
+                    await supabase.from("transactions").update({ pawapay_deposit_id: newDepositId }).eq("id", tx.id);
+                    try {
+                        await initiatePawaPayDeposit(newDepositId, phone, tx.base_amount, tx.currency);
+                        await sendWhatsAppText(phone, "🔄 La demande a été renvoyée. Vérifiez votre écran de téléphone pour le code PIN M-Pesa/Airtel.");
+                    } catch (error) {
+                        await sendWhatsAppText(phone, "❌ Erreur opérateur. Veuillez patienter.");
+                    }
+                } else {
+                    await sendWhatsAppText(phone, "⏳ Votre paiement est en cours de traitement par l'opérateur. Si vous n'avez rien reçu, envoyez REESSAYER.");
+                }
                 break;
 
             case "AWAITING_DELIVERY_SELLER": {
@@ -403,15 +438,18 @@ export async function processMessage(phone: string, text: string) {
                         const payoutId = crypto.randomUUID();
                         const payoutAmount = Number((txFunded.base_amount * 0.975).toFixed(2));
                         await sendWhatsAppText(phone, MESSAGES.PAYOUT_INITIATED);
+                        
+                        await supabase.from("transactions").update({ pawapay_payout_id: payoutId }).eq("id", txFunded.id);
                         await initiatePawaPayPayout(payoutId, phone, payoutAmount, txFunded.currency);
                         
-                        await supabase.from("transactions").update({ status: "COMPLETED", pawapay_payout_id: payoutId }).eq("id", txFunded.id);
                         await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
                         await sendWhatsAppText(txFunded.buyer_phone, MESSAGES.PAYMENT_SUCCESS_BUYER_FINAL || "✅ Transaction clôturée.\n\nLe code PIN a été utilisé avec succès. Le vendeur a reçu son argent."); 
                         await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", txFunded.buyer_phone);
                     } catch (error) {
                         console.error("Payout Error:", error);
-                        await sendWhatsAppText(phone, "❌ Erreur technique. L'opérateur a rejeté le dépôt (Vérifiez le plafond de votre compte).");
+                        await supabase.from("transactions").update({ status: "PAYOUT_FAILED" }).eq("id", txFunded.id);
+                        await supabase.from("sessions").upsert({ phone_number: phone, current_state: "AWAITING_NEW_PAYOUT_NUMBER", draft_transaction_id: txFunded.id }, { onConflict: 'phone_number' });
+                        await sendWhatsAppText(phone, "❌ Erreur technique. L'opérateur a rejeté le dépôt.\n\n👉 *Veuillez répondre avec un NOUVEAU numéro (Airtel, Orange ou M-Pesa) pour recevoir vos fonds.*");
                     }
                 } else {
                     const newAttempts = (txFunded.pin_attempts || 0) + 1;
@@ -429,7 +467,6 @@ export async function processMessage(phone: string, text: string) {
                 break;
             }
 
-            // 🛡️ LOOPHOLE 2: ACCOUNT LIMITS & PAYOUT REDIRECTION
             case "AWAITING_NEW_PAYOUT_NUMBER": {
                 const { data: txToPay } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
                 
@@ -437,10 +474,13 @@ export async function processMessage(phone: string, text: string) {
                     const payoutId = crypto.randomUUID();
                     const payoutAmount = Number((txToPay.base_amount * 0.975).toFixed(2));
                     await sendWhatsAppText(phone, "⏳ Nouvelle tentative d'envoi vers votre numéro principal...");
-                    await initiatePawaPayPayout(payoutId, phone, payoutAmount, txToPay.currency);
-                    
                     await supabase.from("transactions").update({ pawapay_payout_id: payoutId }).eq("id", txToPay.id);
-                    await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+                    try {
+                        await initiatePawaPayPayout(payoutId, phone, payoutAmount, txToPay.currency);
+                        await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+                    } catch (e) {
+                        await sendWhatsAppText(phone, "❌ L'opérateur refuse toujours l'envoi. Veuillez fournir un NOUVEAU numéro.");
+                    }
                 } else {
                     let newPhone = cleanText.replace(/\+/g, '').replace(/\s/g, '');
                     if (newPhone.startsWith("0") && newPhone.length === 10) newPhone = "243" + newPhone.substring(1);
@@ -449,18 +489,23 @@ export async function processMessage(phone: string, text: string) {
                     const payoutId = crypto.randomUUID();
                     const payoutAmount = Number((txToPay.base_amount * 0.975).toFixed(2));
                     await sendWhatsAppText(phone, `⏳ Envoi des fonds vers le nouveau numéro ${newPhone}...`);
-                    await initiatePawaPayPayout(payoutId, newPhone, payoutAmount, txToPay.currency);
                     
                     const updatedNote = txToPay.admin_note ? `${txToPay.admin_note} | Payout redirected to ${newPhone}` : `Payout redirected to ${newPhone}`;
-                    await supabase.from("transactions").update({ pawapay_payout_id: payoutId, admin_note: updatedNote }).eq("id", txToPay.id);
-                    await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+                    await supabase.from("transactions").update({ pawapay_payout_id: payoutId, admin_note: updatedNote, seller_phone: newPhone }).eq("id", txToPay.id);
+                    
+                    try {
+                        await initiatePawaPayPayout(payoutId, newPhone, payoutAmount, txToPay.currency);
+                        await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+                    } catch (e) {
+                        await sendWhatsAppText(phone, "❌ Le nouveau numéro a également été rejeté par l'opérateur.");
+                    }
                 }
                 break;
             }
 
             case "AWAITING_CANCELLATION_APPROVAL": {
                 const { data: cancelTx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
-                if (cleanText === "CMD_ACCEPTER_ANNULATION" || cleanText.toUpperCase() === "ACCEPTER") {
+                if (cleanText === "CMD_ACCEPTER_ANNULATION" || cleanText.toUpperCase() === "ACCEPTER" || cleanText.toUpperCase() === "REMBOURSER") {
                     await sendWhatsAppText(phone, "⏳ Annulation acceptée. Remboursement en cours...");
                     try {
                         const refundId = crypto.randomUUID();
@@ -487,7 +532,17 @@ export async function processMessage(phone: string, text: string) {
             }
 
             case "AWAITING_DELIVERY_BUYER":
-                await sendWhatsAppText(phone, "⏳ En attente de la livraison. Gardez précieusement votre code PIN.");
+                if (cleanText.toUpperCase() === "LITIGE") {
+                    const { data: tx } = await supabase.from("transactions").select("*").eq("buyer_phone", phone).eq("status", "FUNDED").single();
+                    if (tx) {
+                        await supabase.from("transactions").update({ status: "DISPUTED" }).eq("id", tx.id);
+                        await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
+                        await sendWhatsAppText(phone, "🚨 La transaction est maintenant en LITIGE. Les fonds sont strictement gelés. Notre équipe de conformité va vous contacter.");
+                        await sendWhatsAppText(tx.seller_phone, `🚨 L'acheteur a ouvert un LITIGE sur la transaction ${tx.reference}. Les fonds sont gelés. Un agent Clairtus va vous contacter.`);
+                    }
+                } else {
+                    await sendWhatsAppText(phone, "⏳ En attente de la livraison. Gardez précieusement votre code PIN.\n\n⚠️ En cas de problème grave avec le vendeur, tapez *LITIGE* pour geler les fonds.");
+                }
                 break;
 
             case "INITIATED_SELLER":
@@ -535,19 +590,33 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
         await sendWhatsAppText(tx.seller_phone, MESSAGES.CONTRACT_ACCEPTED_SELLER_NOTIFIED);
         await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_SELLER" }).eq("phone_number", tx.seller_phone);
         
-        await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", acceptingPhone);
-        await sendWhatsAppButtons(acceptingPhone, MESSAGES.PRE_PAYMENT_BUYER + currencyWarning + warning, [
-            { id: "CMD_PAYER", title: "💳 PAYER" },
-            { id: "CMD_ANNULER", title: "❌ ANNULER" }
-        ]);
+        const newDepositId = crypto.randomUUID();
+        await supabase.from("transactions").update({ pawapay_deposit_id: newDepositId }).eq("id", tx.id);
+        
+        await supabase.from("sessions").update({ current_state: "AWAITING_DEPOSIT_CONFIRMATION" }).eq("phone_number", acceptingPhone);
+        await sendWhatsAppText(acceptingPhone, MESSAGES.DEPOSIT_INITIATED + currencyWarning + warning);
+        
+        try {
+            await initiatePawaPayDeposit(newDepositId, acceptingPhone, tx.base_amount, tx.currency);
+        } catch (error) {
+            await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", acceptingPhone);
+            await sendWhatsAppText(acceptingPhone, "❌ Erreur de réseau avec l'opérateur. Veuillez répondre REESSAYER pour tenter à nouveau.");
+        }
     } else {
         await sendWhatsAppText(acceptingPhone, MESSAGES.CONTRACT_ACCEPTED_BUYER_NOTIFIED);
         await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_SELLER" }).eq("phone_number", acceptingPhone);
         
-        await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", tx.buyer_phone);
-        await sendWhatsAppButtons(tx.buyer_phone, MESSAGES.PRE_PAYMENT_BUYER + currencyWarning + warning, [
-            { id: "CMD_PAYER", title: "💳 PAYER" },
-            { id: "CMD_ANNULER", title: "❌ ANNULER" }
-        ]);
+        const newDepositId = crypto.randomUUID();
+        await supabase.from("transactions").update({ pawapay_deposit_id: newDepositId }).eq("id", tx.id);
+        
+        await supabase.from("sessions").update({ current_state: "AWAITING_DEPOSIT_CONFIRMATION" }).eq("phone_number", tx.buyer_phone);
+        await sendWhatsAppText(tx.buyer_phone, MESSAGES.DEPOSIT_INITIATED + currencyWarning + warning);
+        
+        try {
+            await initiatePawaPayDeposit(newDepositId, tx.buyer_phone, tx.base_amount, tx.currency);
+        } catch (error) {
+            await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", tx.buyer_phone);
+            await sendWhatsAppText(tx.buyer_phone, "❌ Erreur de réseau avec l'opérateur. Veuillez répondre REESSAYER pour tenter à nouveau.");
+        }
     }
 }
