@@ -1,0 +1,1 @@
+export const getWhatsAppBotUrl = () => "https://wa.me/243000000000";
