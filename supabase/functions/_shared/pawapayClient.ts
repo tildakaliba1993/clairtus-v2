@@ -1,91 +1,115 @@
 // supabase/functions/_shared/pawapayClient.ts
+import { getSupabaseClient } from "./supabaseClient.ts";
 
-export async function initiatePawaPayDeposit(depositId: string, phone: string, amount: number, currency: string) {
-  const jwt = Deno.env.get("PAWAPAY_JWT");
-  if (!jwt) throw new Error("Missing PAWAPAY_JWT in Supabase Vault");
+const PAWAPAY_JWT = Deno.env.get("PAWAPAY_JWT") || ""; 
 
-  const cleanPhone = phone.replace(/\+/g, '').replace(/\s/g, '');
-  let correspondent = "VODACOM_MPESA_COD";
+const isSandbox = PAWAPAY_JWT.toLowerCase().includes("sandbox") || PAWAPAY_JWT.startsWith("test");
+const PAWAPAY_BASE_URL = isSandbox ? "https://api.sandbox.pawapay.io" : "https://api.pawapay.io";
 
-  if (cleanPhone.startsWith("24399") || cleanPhone.startsWith("24397")) correspondent = "AIRTEL_OAPI_COD";
-  else if (cleanPhone.startsWith("24384") || cleanPhone.startsWith("24385") || cleanPhone.startsWith("24389")) correspondent = "ORANGE_COD";
-  else if (cleanPhone.startsWith("24390")) correspondent = "AFRICELL_COD";
+const SUPABASE_WEBHOOK_URL = "https://ykzctgurmppikuesgvwt.supabase.co/functions/v1/pawapay-webhook";
 
-  const payload = {
-      depositId: depositId, 
-      amount: amount.toString(), 
-      currency: currency, // 🚀 DYNAMIC CURRENCY
-      country: "COD",
-      correspondent: correspondent,
-      payer: { type: "MSISDN", address: { value: cleanPhone } },
-      customerTimestamp: new Date().toISOString(),
-      statementDescription: "Clairtus Sequestre"
-  };
-
-  console.log(`[PawaPay] Sending Deposit Request for ${cleanPhone} (${amount} ${currency}) via ${correspondent}`);
-
-  const response = await fetch("https://api.pawapay.cloud/v1/deposits", {
-      method: "POST", 
-      headers: { "Authorization": `Bearer ${jwt}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-  });
-
-  const responseText = await response.text();
-  console.log(`[PawaPay] Raw Response Status: ${response.status}`);
-  
-  if (!response.ok) {
-      throw new Error(`PawaPay API Error: ${response.status} - ${responseText}`);
-  }
-
-  const result = JSON.parse(responseText);
-  if (result.status === "REJECTED") {
-      throw new Error(`PawaPay Rejected Deposit: ${result.rejectionReason?.rejectionMessage}`);
-  }
-
-  return result;
+export function getProviderByNetwork(network: string): string {
+    const upperNetwork = network.toUpperCase();
+    if (upperNetwork.includes("AIRTEL")) return "AIRTEL_COD";
+    if (upperNetwork.includes("VODACOM") || upperNetwork.includes("MPESA")) return "VODACOM_MPESA_COD";
+    if (upperNetwork.includes("ORANGE")) return "ORANGE_COD";
+    return "VODACOM_MPESA_COD"; // Fallback
 }
 
-export async function initiatePawaPayPayout(payoutId: string, phone: string, amount: number, currency: string) {
-  const jwt = Deno.env.get("PAWAPAY_JWT");
-  if (!jwt) throw new Error("Missing PAWAPAY_JWT in Supabase Vault");
+export function formatAmount(network: string, currency: string, amount: number): string {
+    const upperNetwork = network.toUpperCase();
+    const upperCurrency = currency.toUpperCase();
 
-  const cleanPhone = phone.replace(/\+/g, '').replace(/\s/g, '');
-  let correspondent = "VODACOM_MPESA_COD";
+    if ((upperNetwork.includes("VODACOM") || upperNetwork.includes("MPESA")) && upperCurrency === "CDF") {
+        return Math.round(amount).toString(); 
+    }
+    
+    return amount.toFixed(2);
+}
 
-  if (cleanPhone.startsWith("24399") || cleanPhone.startsWith("24397")) correspondent = "AIRTEL_OAPI_COD";
-  else if (cleanPhone.startsWith("24384") || cleanPhone.startsWith("24385") || cleanPhone.startsWith("24389")) correspondent = "ORANGE_COD";
-  else if (cleanPhone.startsWith("24390")) correspondent = "AFRICELL_COD";
+export async function initiatePawaPayDeposit(depositId: string, phone: string, amount: number, currency: string = "USD") {
+    let network = "VODACOM";
+    if (phone.startsWith("24397") || phone.startsWith("24399")) network = "AIRTEL";
+    if (phone.startsWith("24384") || phone.startsWith("24385") || phone.startsWith("24389")) network = "ORANGE";
 
-  const payload = {
-      payoutId: payoutId, 
-      amount: amount.toString(), 
-      currency: currency, // 🚀 DYNAMIC CURRENCY
-      country: "COD",
-      correspondent: correspondent,
-      recipient: { type: "MSISDN", address: { value: cleanPhone } },
-      customerTimestamp: new Date().toISOString(), 
-      statementDescription: "Paiement Clairtus" 
-  };
+    const provider = getProviderByNetwork(network);
+    const formattedAmount = formatAmount(network, currency, amount);
 
-  console.log(`[PawaPay] Sending Payout Request for ${cleanPhone} (${amount} ${currency}) via ${correspondent}`);
+    console.log(`[PawaPay] Sending DEPOSIT Request to ${PAWAPAY_BASE_URL}/v1/deposits for ${phone} via ${provider}. Amount: ${formattedAmount} ${currency}`);
 
-  const response = await fetch("https://api.pawapay.cloud/v1/payouts", {
-      method: "POST", 
-      headers: { "Authorization": `Bearer ${jwt}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-  });
+    const response = await fetch(`${PAWAPAY_BASE_URL}/v1/deposits`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${PAWAPAY_JWT}`
+        },
+        body: JSON.stringify({
+            depositId: depositId,
+            amount: formattedAmount,
+            currency: currency.toUpperCase(),
+            country: "COD",
+            correspondent: provider,
+            payer: {
+                type: "MSISDN",
+                address: {
+                    value: phone
+                }
+            },
+            customerTimestamp: new Date().toISOString(),
+            statementDescription: "Clairtus Escrow",
+            returnUrl: SUPABASE_WEBHOOK_URL
+        })
+    });
 
-  const responseText = await response.text();
-  console.log(`[PawaPay] Raw Payout Response Status: ${response.status}`);
-  
-  if (!response.ok) {
-      throw new Error(`PawaPay API Error: ${response.status} - ${responseText}`);
-  }
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Deposit Error: ${errorText}`);
+        throw new Error(`PawaPay Rejected Deposit: ${errorText}`);
+    }
 
-  const result = JSON.parse(responseText);
-  if (result.status === "REJECTED") {
-      throw new Error(`PawaPay Rejected Payout: ${result.rejectionReason?.rejectionMessage}`);
-  }
+    return await response.json();
+}
 
-  return result;
+export async function initiatePawaPayPayout(payoutId: string, phone: string, amount: number, currency: string = "USD") {
+    let network = "VODACOM";
+    if (phone.startsWith("24397") || phone.startsWith("24399")) network = "AIRTEL";
+    if (phone.startsWith("24384") || phone.startsWith("24385") || phone.startsWith("24389")) network = "ORANGE";
+
+    const provider = getProviderByNetwork(network);
+    const formattedAmount = formatAmount(network, currency, amount);
+
+    console.log(`[PawaPay] Sending PAYOUT Request to ${PAWAPAY_BASE_URL}/v1/payouts for ${phone} via ${provider}. Amount: ${formattedAmount} ${currency}`);
+
+    const response = await fetch(`${PAWAPAY_BASE_URL}/v1/payouts`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${PAWAPAY_JWT}`
+        },
+        body: JSON.stringify({
+            payoutId: payoutId,
+            amount: formattedAmount,
+            currency: currency.toUpperCase(),
+            country: "COD",
+            correspondent: provider,
+            recipient: {
+                type: "MSISDN",
+                address: {
+                    value: phone
+                }
+            },
+            // 🔧 THE FIX: Added the missing timestamp to the Payout request
+            customerTimestamp: new Date().toISOString(),
+            statementDescription: "Clairtus Payout",
+            returnUrl: SUPABASE_WEBHOOK_URL
+        })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Payout Error: ${errorText}`);
+        throw new Error(`PawaPay Rejected Payout: ${errorText}`);
+    }
+
+    return await response.json();
 }

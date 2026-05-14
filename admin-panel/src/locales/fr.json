@@ -1,70 +1,70 @@
 {
   "nav": {
-    "programs": "Le Protocole",
-    "benefits": "L'Infrastructure",
+    "programs": "Comment ça marche",
+    "benefits": "Cas d'usage",
     "faq": "FAQ",
     "login": "Support",
-    "apply": "Ouvrir l'accès"
+    "apply": "Démarrer"
   },
   "hero": {
     "badge": "Déployé en RDC 🇨🇩 • Construit pour l'Afrique 🌍",
-    "title": "Ne livrez plus à découvert. Ne payez plus à l'aveugle.",
-    "subtitle": "L'ultime couche de confiance pour le commerce informel. Acheteur ou Vendeur, initiez la transaction d'un simple 'Bonjour'. L'argent est bloqué via Mobile Money et libéré par code PIN à la livraison. 100% sur WhatsApp.",
-    "primaryCta": "Démarrer une transaction",
-    "secondaryCta": "Comment ça marche"
+    "title": "Achetez sans peur. Vendez sans risque.",
+    "subtitle": "La première infrastructure de confiance pour le commerce informel en Afrique. Bloquez les fonds via Mobile Money. L'argent n'est libéré au vendeur que lorsque l'acheteur remet son Code PIN secret à la livraison. 100% automatisé sur WhatsApp.",
+    "primaryCta": "Démarrer sur WhatsApp",
+    "secondaryCta": "Comment ça marche ?"
   },
   "stats": {
     "rate": "Zéro",
-    "rateLabel": "Risque de Fraude",
-    "salary": "Instantané",
-    "salaryLabel": "Décaissement",
-    "network": "Bilatéral",
-    "networkLabel": "Initiation Flexible"
+    "rateLabel": "Risque d'Arnaque",
+    "salary": "100%",
+    "salaryLabel": "Natif sur WhatsApp",
+    "network": "Multi",
+    "networkLabel": "Réseaux (M-Pesa, Airtel, Orange)"
   },
   "features": {
-    "title": "L'infrastructure qui élimine 100% des fraudes dans le commerce social.",
-    "subtitle": "Une architecture de séquestre conçue pour protéger vos marges et rassurer vos clients, quelle que soit la partie qui lance l'opération.",
+    "title": "Conçu pour toutes vos transactions à risque.",
+    "subtitle": "Là où il y a un risque de fraude ou de vol, Clairtus doit être là. Notre technologie d'Escrow ne se limite pas aux colis physiques ; elle protège votre argent dans toutes les situations.",
     "items": [
       {
-        "title": "Initiation Bilatérale",
-        "description": "Vous êtes vendeur ? Envoyez la facture. Vous êtes acheteur ? Proposez le paiement sécurisé. Un simple 'Bonjour' au bot lance le protocole."
+        "title": "Garanties Locatives (Caution)",
+        "description": "Ne risquez plus vos mois de caution avec de faux courtiers ou propriétaires. Bloquez les fonds sur Clairtus, visitez la maison, et ne donnez votre PIN que lorsque vous signez le bail et recevez les clés."
       },
       {
-        "title": "Solvabilité Garantie",
-        "description": "L'argent est séquestré numériquement via M-Pesa, Airtel ou Orange avant même que le colis ne parte. Ne déplacez plus jamais votre stock pour rien."
+        "title": "Achat de Véhicules & Électronique",
+        "description": "N'allez plus aux rendez-vous avec des liasses de billets. Bloquez les fonds sur votre téléphone, inspectez la voiture ou l'ordinateur en toute sécurité, et libérez le paiement sur place."
       },
       {
-        "title": "Libération par Code PIN",
-        "description": "L'acheteur garde le contrôle absolu. Les fonds ne sont transférés qu'au moment précis où il vérifie la marchandise et transmet son PIN secret à 4 chiffres."
+        "title": "Commerce de Gros & Expéditions",
+        "description": "Sécurisez l'envoi de marchandises vers les provinces. Le grossiste expédie sans crainte de non-paiement, et le détaillant ne paie que lorsque la cargaison arrive à bon port."
       },
       {
-        "title": "Résolution Incorruptible",
-        "description": "Litige à la livraison ? L'argent reste gelé. Notre protocole de médiation protège l'acheteur des produits défectueux et le vendeur des extorsions."
+        "title": "Matériaux de Construction",
+        "description": "Construisez l'esprit tranquille, même depuis l'étranger. Bloquez les fonds chez le fournisseur. Il n'est payé que lorsque le camion décharge le ciment ou les briques directement sur votre chantier."
       }
     ]
   },
   "programs": {
-    "title": "Trois étapes. Zéro faille.",
-    "subtitle": "Sécurisez n'importe quelle transaction informelle en moins de 60 secondes.",
+    "title": "La confiance, en 3 étapes simples.",
+    "subtitle": "Un processus fluide et sécurisé pour protéger votre argent à chaque instant.",
     "items": [
       {
-        "title": "1. L'Accord Verrouillé",
-        "description": "Acheteur ou Vendeur initie la transaction via WhatsApp. L'acheteur provisionne les fonds en un clic. L'argent est instantanément mis sous cloche."
+        "title": "1. Lancez la transaction",
+        "description": "Ouvrez WhatsApp. Entrez le numéro de votre vendeur (ou acheteur) et le prix convenu. Clairtus envoie une invitation instantanée."
       },
       {
-        "title": "2. L'Expédition Sans Risque",
-        "description": "Clairtus émet un PIN unique à l'acheteur et donne le feu vert au vendeur. La marchandise peut voyager : la liquidité est déjà sécurisée sur nos serveurs."
+        "title": "2. L'Acheteur bloque les fonds",
+        "description": "L'acheteur valide le paiement via un prompt Mobile Money sécurisé sur son téléphone. Le vendeur est notifié qu'il peut livrer sans crainte."
       },
       {
-        "title": "3. Le Déclenchement",
-        "description": "À la réception, l'acheteur valide l'article en remettant son PIN. Le vendeur l'envoie au bot et l'argent atterrit instantanément sur son compte."
+        "title": "3. Livraison et Paiement",
+        "description": "À la réception de la marchandise, l'acheteur donne son PIN secret. Le vendeur l'envoie au bot et l'argent est instantanément transféré sur son compte."
       }
     ]
   },
   "cta": {
-    "title": "Faire des affaires sans Clairtus, c'est jouer à la roulette russe.",
-    "subtitle": "Rejoignez l'avant-garde des marchands et acheteurs qui exigent la sécurité absolue. Protégez vos marges et dominez votre marché.",
-    "button": "Créer mon premier lien sécurisé"
+    "title": "Le pouvoir est de nouveau entre vos mains.",
+    "subtitle": "Acheteurs : Fini les acomptes perdus. Vendeurs : Finies les fausses courses. Ne vous déplacez que lorsque les fonds sont bloqués. Protégez vos marges avec Clairtus.",
+    "button": "Démarrer une transaction sécurisée"
   },
   "footer": {
     "description": "Clairtus — L'infrastructure de confiance de l'économie informelle Africaine.",

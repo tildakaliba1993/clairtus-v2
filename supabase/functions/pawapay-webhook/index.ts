@@ -80,22 +80,20 @@ Deno.serve(async (req: Request) => {
                 console.log(`✅ Payout COMPLETED for TX: ${tx.reference}`);
                 await supabase.from("transactions").update({ status: "COMPLETED" }).eq("id", tx.id);
 
-                // 🛡️ LOOPHOLE 3: TRUST SCORE ALGORITHM (Reward for Successful Trade)
-                // We increment completed tx count and add +2 to trust score for both parties (max 99)
                 try {
                     await supabase.rpc('increment_trust_score', { phone_number_to_update: tx.seller_phone });
                     await supabase.rpc('increment_trust_score', { phone_number_to_update: tx.buyer_phone });
                     console.log(`📈 [TRUST SCORE] Incremented for ${tx.seller_phone} and ${tx.buyer_phone}`);
                 } catch (scoreError) {
                     console.error("Failed to update trust scores:", scoreError);
-                    // We don't throw here; we don't want to crash the webhook if just the scoring fails
                 }
 
             } else if (status === "FAILED" || status === "REJECTED") {
                 console.log(`❌ Payout FAILED for TX: ${tx.reference}. Reason:`, body.failureReason);
                 await supabase.from("network_events").insert({ network: getNetworkName(tx.seller_phone), event_type: "PAYOUT_FAILED" });
                 
-                await supabase.from("transactions").update({ status: "FUNDED", pawapay_payout_id: null }).eq("id", tx.id);
+                // 🔧 UAT FIX: Explicitly set status to PAYOUT_FAILED so the State Machine catches it
+                await supabase.from("transactions").update({ status: "PAYOUT_FAILED", pawapay_payout_id: null }).eq("id", tx.id);
                 await supabase.from("sessions").upsert({ phone_number: tx.seller_phone, current_state: "AWAITING_NEW_PAYOUT_NUMBER", draft_transaction_id: tx.id }, { onConflict: 'phone_number' });
                 await sendWhatsAppText(tx.seller_phone, `⚠️ *Échec du Transfert*\n\nL'opérateur a rejeté l'envoi de vos fonds. Raison possible: limite de solde atteinte ou compte inactif.\n\nVeuillez envoyer un **nouveau numéro Mobile Money** (ex: 243...) pour recevoir votre argent, ou tapez *RÉESSAYER* si vous avez vidé votre compte.`);
             }
