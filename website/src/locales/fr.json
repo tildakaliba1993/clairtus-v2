@@ -1,73 +1,73 @@
 {
-    "nav": {
-      "programs": "Comment ça marche",
-      "benefits": "Cas d'usage",
-      "faq": "FAQ",
-      "login": "Support",
-      "apply": "Démarrer"
-    },
-    "hero": {
-      "badge": "Déployé en RDC 🇨🇩 • Construit pour l'Afrique 🌍",
-      "title": "Achetez sans peur. Vendez sans risque.",
-      "subtitle": "La première infrastructure de confiance pour le commerce informel en Afrique. Bloquez les fonds via Mobile Money. L'argent n'est libéré au vendeur que lorsque l'acheteur remet son Code PIN secret à la livraison. 100% automatisé sur WhatsApp.",
-      "primaryCta": "Démarrer sur WhatsApp",
-      "secondaryCta": "Comment ça marche ?"
-    },
-    "stats": {
-      "rate": "Zéro",
-      "rateLabel": "Risque d'Arnaque",
-      "salary": "100%",
-      "salaryLabel": "Natif sur WhatsApp",
-      "network": "Multi",
-      "networkLabel": "Réseaux (M-Pesa, Airtel, Orange)"
-    },
-    "features": {
-      "title": "Conçu pour toutes vos transactions à risque.",
-      "subtitle": "Là où il y a un risque de fraude ou de vol, Clairtus doit être là. Notre technologie d'Escrow ne se limite pas aux colis physiques ; elle protège votre argent dans toutes les situations.",
-      "items": [
-        {
-          "title": "Garanties Locatives (Caution)",
-          "description": "Ne risquez plus vos mois de caution avec de faux courtiers ou propriétaires. Bloquez les fonds sur Clairtus, visitez la maison, et ne donnez votre PIN que lorsque vous signez le bail et recevez les clés."
-        },
-        {
-          "title": "Achat de Véhicules & Électronique",
-          "description": "N'allez plus aux rendez-vous avec des liasses de billets. Bloquez les fonds sur votre téléphone, inspectez la voiture ou l'ordinateur en toute sécurité, et libérez le paiement sur place."
-        },
-        {
-          "title": "Commerce de Gros & Expéditions",
-          "description": "Sécurisez l'envoi de marchandises vers les provinces. Le grossiste expédie sans crainte de non-paiement, et le détaillant ne paie que lorsque la cargaison arrive à bon port."
-        },
-        {
-          "title": "Matériaux de Construction",
-          "description": "Construisez l'esprit tranquille, même depuis l'étranger. Bloquez les fonds chez le fournisseur. Il n'est payé que lorsque le camion décharge le ciment ou les briques directement sur votre chantier."
-        }
-      ]
-    },
-    "programs": {
-      "title": "La confiance, en 3 étapes simples.",
-      "subtitle": "Un processus fluide et sécurisé pour protéger votre argent à chaque instant.",
-      "items": [
-        {
-          "title": "1. Lancez la transaction",
-          "description": "Ouvrez WhatsApp. Entrez le numéro de votre vendeur (ou acheteur) et le prix convenu. Clairtus envoie une invitation instantanée."
-        },
-        {
-          "title": "2. L'Acheteur bloque les fonds",
-          "description": "L'acheteur valide le paiement via un prompt Mobile Money sécurisé sur son téléphone. Le vendeur est notifié qu'il peut livrer sans crainte."
-        },
-        {
-          "title": "3. Livraison et Paiement",
-          "description": "À la réception de la marchandise, l'acheteur donne son PIN secret. Le vendeur l'envoie au bot et l'argent est instantanément transféré sur son compte."
-        }
-      ]
-    },
-    "cta": {
-      "title": "Le pouvoir est de nouveau entre vos mains.",
-      "subtitle": "Acheteurs : Fini les acomptes perdus. Vendeurs : Finies les fausses courses. Ne vous déplacez que lorsque les fonds sont bloqués. Protégez vos marges avec Clairtus.",
-      "button": "Démarrer une transaction sécurisée"
-    },
-    "footer": {
-      "description": "Clairtus — L'infrastructure de confiance de l'économie informelle Africaine.",
-      "rights": "© 2026 Clairtus. Tous droits réservés."
-    }
+  "nav": {
+    "programs": "Comment ça marche",
+    "benefits": "Cas d'usage",
+    "faq": "FAQ",
+    "login": "Support",
+    "apply": "Démarrer"
+  },
+  "hero": {
+    "badge": "Déployé en RDC 🇨🇩 • Construit pour l'Afrique 🌍",
+    "title": "Achetez sans peur. Vendez sans risque.",
+    "subtitle": "La première infrastructure d'entiercement et de paiements partagés en Afrique. Fini les vendeurs fantômes et les fausses promesses. Sécurisez vos fonds via Mobile Money. L'argent n'est libéré qu'à la livraison. 100% automatisé sur WhatsApp.",
+    "primaryCta": "Démarrer sur WhatsApp",
+    "secondaryCta": "Comment ça marche ?"
+  },
+  "stats": {
+    "rate": "Zéro",
+    "rateLabel": "Risque de Vol ou d'Arnaque",
+    "salary": "100%",
+    "salaryLabel": "Contrôle par l'Acheteur",
+    "network": "Multi",
+    "networkLabel": "Bénéficiaires & Réseaux"
+  },
+  "features": {
+    "title": "Conçu pour l'économie réelle. Bâti contre la fraude.",
+    "subtitle": "Partout où il y a un risque de vol, de disparition ou de marchandise non conforme, Clairtus sécurise votre argent. Un contrat de confiance incontournable pour toutes vos transactions à risque.",
+    "items": [
+      {
+        "title": "Garanties Locatives (Immobilier)",
+        "description": "Fini les faux courtiers qui disparaissent avec votre caution. Sécurisez vos mois de garantie sur Clairtus. Ne remettez votre code secret qu'une fois les clés en main. Les commissions sont payées automatiquement."
+      },
+      {
+        "title": "Véhicules & Électronique",
+        "description": "Ne risquez plus votre sécurité en transportant des liasses de billets vers des inconnus. Sécurisez les fonds depuis votre téléphone, prenez le temps d'inspecter l'article, et libérez le paiement sur place."
+      },
+      {
+        "title": "Commerce de Gros & Expéditions",
+        "description": "Achetez en province ou expédiez sans craindre l'impayé. Le fournisseur expédie l'esprit tranquille, et l'acheteur ne libère les fonds qu'à la réception de la bonne marchandise."
+      },
+      {
+        "title": "Matériaux de Construction",
+        "description": "Ne vous faites plus avoir par des fournisseurs fantômes. Votre argent reste verrouillé sur notre plateforme. Il n'est transféré que lorsque le ciment ou les tôles sont physiquement livrés sur votre chantier."
+      }
+    ]
+  },
+  "programs": {
+    "title": "L'ingénierie de la confiance, simplifiée à l'extrême.",
+    "subtitle": "Toute la puissance d'une infrastructure financière de pointe, accessible via une simple conversation WhatsApp.",
+    "items": [
+      {
+        "title": "1. Initiez la transaction",
+        "description": "Ouvrez WhatsApp. Saisissez le montant et ajoutez (si besoin) un deuxième bénéficiaire pour répartir le paiement final. L'accord est scellé en quelques secondes."
+      },
+      {
+        "title": "2. Verrouillez les fonds",
+        "description": "L'acheteur sécurise l'argent via une notification Mobile Money. Les fonds sont mis en sécurité absolue sur nos serveurs. Le vendeur est immédiatement notifié qu'il peut livrer."
+      },
+      {
+        "title": "3. Validez et libérez",
+        "description": "Pas de livraison conforme ? Pas de paiement. À la réception, l'acheteur fournit son code PIN secret à 4 chiffres. Clairtus transfère alors l'argent instantanément."
+      }
+    ]
+  },
+  "cta": {
+    "title": "Le pouvoir est de nouveau entre vos mains.",
+    "subtitle": "Acheteurs : Ne vous faites plus jamais escroquer ou ignorer après un acompte. Vendeurs : Ne vous déplacez que lorsque l'argent est verrouillé. Protégez chaque transaction avec Clairtus.",
+    "button": "Démarrer une transaction sécurisée"
+  },
+  "footer": {
+    "description": "Clairtus — L'infrastructure de confiance de l'économie informelle Africaine.",
+    "rights": "© 2026 Clairtus. Tous droits réservés."
   }
+}
