@@ -39,20 +39,35 @@ export default function AdminPortal() {
   }, []);
 
   const fetchDashboardData = async () => {
-    const [txResponse, usersResponse] = await Promise.all([
-      supabase.from("transactions").select("*").order("created_at", { ascending: false }).limit(1000),
-      supabase.from("users").select("*")
-    ]);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-    if (txResponse.data) setTransactions(txResponse.data);
-    if (usersResponse.data) {
-      const mappedUsers = usersResponse.data.reduce((acc, user) => {
-        if (user.phone_number) {
-          acc[user.phone_number] = user;
+      const response = await fetch('/api/admin/dashboard', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
         }
-        return acc;
-      }, {});
-      setUserMap(mappedUsers);
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch dashboard data: ${response.statusText}`);
+      }
+
+      const { transactions: txData, users: usersData } = await response.json();
+
+      if (txData) setTransactions(txData);
+      
+      if (usersData) {
+        const mappedUsers = usersData.reduce((acc: any, user: any) => {
+          if (user.phone_number) {
+            acc[user.phone_number] = user;
+          }
+          return acc;
+        }, {});
+        setUserMap(mappedUsers);
+      }
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
     }
   };
 
