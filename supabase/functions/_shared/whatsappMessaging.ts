@@ -7,6 +7,12 @@ export const MESSAGES = {
   LAST_NAME_REQUEST: `👤 Prénom enregistré.\n\nQuel est votre nom de famille ? (Répondez uniquement avec votre nom)`,
   LAST_NAME_INVALID: `❌ Format invalide.\n\nVeuillez envoyer uniquement votre nom de famille.\nExemple : Mbuyi`,
 
+  // 1.5 PROMO CODE FLOW
+  ASK_PROMO_CODE: (name: string) => `Enchanté ${name} ! 🎉\n\nAvez-vous un code promo exclusif (ex: BETA26) ?\nSi oui, envoyez-le maintenant.\nSi non, répondez simplement *NON*.`,
+  PROMO_CODE_SUCCESS: (code: string) => `✅ Félicitations ! Votre code promo *${code}* a été appliqué avec succès. Vous bénéficiez de frais réduits pour cette session.\n\nTapez *BONJOUR* pour ouvrir le menu principal.`,
+  PROMO_CODE_INVALID: `❌ Code non reconnu ou expiré.\n\nRépondez *NON* pour continuer sans code, ou réessayez.`,
+  REGISTRATION_COMPLETE: `✅ Votre compte Vendeur est créé.\n\nQue souhaitez-vous faire aujourd'hui ?\nTapez *VENDRE* pour initier une transaction sécurisée.`,
+
   // 2. GUIDED TRANSACTION FLOW
   WELCOME_NEW: `👋 Bienvenue sur Clairtus, le réseau de confiance.\n\nL'argent est mis en sécurité lors de la commande et libéré uniquement à la livraison.\n\nQue souhaitez-vous faire ?`,
   WELCOME_RETURNING: (firstName: string, lastName: string) => 
@@ -25,9 +31,18 @@ export const MESSAGES = {
   AMOUNT_INVALID_FORMAT: `❌ Format du prix invalide.\n\nEnvoyez uniquement des chiffres.\nExemple : 150 ou 150.50`,
   
   COUNTERPARTY_PHONE_REQUEST_SELL: (amount: number, currency: string) => 
-    `💰 Prix : ${amount} ${currency}\n\nQuel est le numéro WhatsApp ou Mobile Money de l'ACHETEUR ?\n(Format international obligatoire, ex: +243810000000)`,
+    `💰 Prix : ${amount} ${currency}\n\nQuel est le numéro WhatsApp ou Mobile Money de l'ACHETEUR ?\n(Format international obligatoire, ex: +243810000000)\n\n⚠️ *Important : L'acheteur doit utiliser M-Pesa ou Orange. Les dépôts Airtel sont temporairement suspendus pour garantir des paiements instantanés.*`,
   COUNTERPARTY_PHONE_REQUEST_BUY: (amount: number, currency: string) => 
     `💰 Prix : ${amount} ${currency}\n\nQuel est le numéro WhatsApp ou Mobile Money du VENDEUR ?\n(Format international obligatoire, ex: +243810000000)`,
+
+  // 2.5 SPLIT PAYOUT FLOW
+  ASK_SPLIT_CHOICE: `Voulez-vous partager ce paiement final avec un deuxième vendeur ou un bailleur ?\n\nRépondez *OUI* ou *NON*.`,
+  ASK_SECONDARY_PHONE: `Entrez le numéro Mobile Money du deuxième bénéficiaire au format international (ex: +243900000000) :`,
+  ASK_SECONDARY_AMOUNT: (total: number, currency: string) => `Sur le total de ${total} ${currency}, quel montant brut doit être envoyé à ce deuxième numéro ?\n\n(Répondez uniquement avec un nombre, ex: 400)`,
+  SPLIT_AMOUNT_ERROR: `⚠️ Erreur : Le montant de la part doit être inférieur au total. Veuillez réessayer.`,
+
+  // 2.8 AIRTEL STRATEGIC BLOCKS (NEW)
+  AIRTEL_BUYER_BLOCKED: `❌ Dépôt Airtel Non Disponible.\n\nPour garantir la fiabilité et la rapidité de vos transactions, les paiements entrants via Airtel sont temporairement suspendus.\n\n👉 *Veuillez utiliser un numéro M-Pesa ou Orange pour payer.*\n\n(Note: Les retraits vers Airtel pour les vendeurs restent 100% fonctionnels).`,
 
   // 3. VALIDATION & INVITE MESSAGES
   PHONE_INVALID: `❌ Numéro invalide.\n\nLe numéro doit inclure l'indicatif du pays sans espaces.\nExemple : +243810000000`,
@@ -46,7 +61,6 @@ export const MESSAGES = {
   CONTRACT_ACCEPTED_BUYER_NOTIFIED: `☑️ Contrat accepté.\n\nLe vendeur a validé la transaction. Nous générons votre lien de paiement...`,
   PRE_PAYMENT_BUYER: `💳 Paiement en attente\n\nLe contrat est prêt. Mettez les fonds en sécurité maintenant pour autoriser le vendeur à expédier.`,
   
-  // 🚀 UNIFIED, FOOLPROOF USSD FALLBACK
   DEPOSIT_INITIATED: `⏳ Demande de paiement envoyée à votre opérateur.\n\n📲 Un écran de validation (prompt) va s'afficher sur votre téléphone d'ici quelques secondes pour saisir votre code PIN.\n\n🛡️ *PLAN B (Si l'écran n'apparaît pas) :*\nLes réseaux télécoms ont parfois des retards. Ne paniquez pas.\nAttendez 1 minute, puis tapez simplement *RÉESSAYER* ici pour qu'on vous renvoie la demande à l'écran.`,
   
   DEPOSIT_ERROR: `❌ Échec de connexion à l'opérateur.\n\nL'opérateur télécom ne répond pas. Veuillez réessayer dans 5 minutes.`,

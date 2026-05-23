@@ -3,6 +3,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   ArrowRightLeft,
   Fingerprint,
@@ -40,6 +41,7 @@ function estimateTypingLeadMs(text: string): number {
   const estimate = 90 + readingUnits + punctuationBonus + emojiBonus;
   return Math.max(MIN_TYPING_LEAD_MS, Math.min(MAX_TYPING_LEAD_MS, estimate));
 }
+
 const VENDEUR_CONVERSATION: ChatMessage[] = [
   { sender: "user", delay: 0.5, text: "BONJOUR" },
   {
@@ -103,6 +105,7 @@ const VENDEUR_CONVERSATION: ChatMessage[] = [
       "👏 Félicitations pour la vente de Smartphone Samsung A54 neuf.\n\nContinuez à vendre avec Clairtus pour des transactions toujours sécurisées.",
   },
 ];
+
 const ACHETEUR_CONVERSATION: ChatMessage[] = [
   { sender: "user", delay: 0.5, text: "BONJOUR" },
   {
@@ -242,14 +245,17 @@ export default function Home() {
 
       <header className="fixed top-0 z-50 w-full border-b border-white/10 bg-[#020617]/80 backdrop-blur-xl">
         <div className={`mx-auto flex h-16 ${pageMaxWidthClass} items-center justify-between px-2`}>
-          <Image
-            src="/logo-clairtus.svg"
-            alt="Clairtus"
-            width={140}
-            height={28}
-            className="h-[42px] w-[110px]"
-            priority
-          />
+          {/* 🔄 UPDATE: Logo is now wrapped in a Link to make it clickable */}
+          <Link href="/" aria-label="Accueil Clairtus" className="transition-opacity hover:opacity-80">
+            <Image
+              src="/logo-clairtus.svg"
+              alt="Clairtus"
+              width={140}
+              height={28}
+              className="h-[42px] w-[110px]"
+              priority
+            />
+          </Link>
           <a
             href={whatsappBotUrl}
             className="rounded-full bg-primary px-4 py-2 text-sm font-semibold font-heading text-primary-foreground shadow-lg shadow-primary/25 transition-transform hover:scale-[1.02] active:scale-[0.98]"
@@ -651,12 +657,12 @@ function ProgramStep({
 }
 
 function InteractiveChatDemo({ prefersReducedMotion }: { prefersReducedMotion: boolean }) {
-  const [view, setView] = useState<DemoView>("vendeur");
+  const [view, setView] = useState<DemoView>("acheteur");
   const [visibleCount, setVisibleCount] = useState(0);
   const [typing, setTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const messages = useMemo(
-    () => (view === "vendeur" ? VENDEUR_CONVERSATION : ACHETEUR_CONVERSATION),
+    () => (view === "acheteur" ? ACHETEUR_CONVERSATION : VENDEUR_CONVERSATION),
     [view],
   );
   const visibleMessages = messages.slice(0, visibleCount);
@@ -725,22 +731,6 @@ function InteractiveChatDemo({ prefersReducedMotion }: { prefersReducedMotion: b
       <div className="mb-5 inline-flex flex-wrap items-center justify-center rounded-full border border-white/10 bg-white/[0.04] p-1 backdrop-blur-md">
         <button
           type="button"
-          onClick={() => setView("vendeur")}
-          className={`relative rounded-full px-4 py-2 text-xs font-semibold transition-colors sm:text-sm ${
-            view === "vendeur" ? "text-primary-foreground" : "text-slate-300 hover:text-white"
-          }`}
-        >
-          {view === "vendeur" && (
-            <motion.span
-              layoutId="toggle-pill"
-              className="absolute inset-0 -z-10 rounded-full bg-primary shadow-lg shadow-primary/30"
-              transition={{ type: "spring", stiffness: 360, damping: 28 }}
-            />
-          )}
-          Vue Vendeur
-        </button>
-        <button
-          type="button"
           onClick={() => setView("acheteur")}
           className={`relative rounded-full px-4 py-2 text-xs font-semibold transition-colors sm:text-sm ${
             view === "acheteur" ? "text-primary-foreground" : "text-slate-300 hover:text-white"
@@ -755,11 +745,43 @@ function InteractiveChatDemo({ prefersReducedMotion }: { prefersReducedMotion: b
           )}
           Vue Acheteur
         </button>
+        <button
+          type="button"
+          onClick={() => setView("vendeur")}
+          className={`relative rounded-full px-4 py-2 text-xs font-semibold transition-colors sm:text-sm ${
+            view === "vendeur" ? "text-primary-foreground" : "text-slate-300 hover:text-white"
+          }`}
+        >
+          {view === "vendeur" && (
+            <motion.span
+              layoutId="toggle-pill"
+              className="absolute inset-0 -z-10 rounded-full bg-primary shadow-lg shadow-primary/30"
+              transition={{ type: "spring", stiffness: 360, damping: 28 }}
+            />
+          )}
+          Vue Vendeur
+        </button>
       </div>
 
       <div className="mx-auto w-full max-w-[320px] overflow-hidden rounded-3xl border-[6px] border-gray-800 bg-[#0b141a] shadow-2xl shadow-primary/20">
         <div className="flex items-center justify-between border-b border-white/10 bg-[#202c33] px-4 py-3 text-sm font-medium text-slate-100">
-          <span className="truncate">🔒 Clairtus Bot</span>
+          <span className="truncate flex items-center gap-1.5">
+            🔒 Clairtus
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              className="text-emerald-400"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM10.29 16.29L6.7 12.7C6.31 12.31 6.31 11.68 6.7 11.29C7.09 10.9 7.72 10.9 8.11 11.29L11 14.18L15.89 9.29C16.28 8.9 16.91 8.9 17.3 9.29C17.69 9.68 17.69 10.31 17.3 10.7L11.71 16.29C11.32 16.68 10.68 16.68 10.29 16.29Z"
+                fill="currentColor"
+              />
+            </svg>
+          </span>
           <span className="text-[11px] text-emerald-300">en ligne</span>
         </div>
 
@@ -840,4 +862,3 @@ function InteractiveChatDemo({ prefersReducedMotion }: { prefersReducedMotion: b
     </div>
   );
 }
-

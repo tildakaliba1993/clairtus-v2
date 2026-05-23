@@ -38,35 +38,77 @@ Deno.serve(async (req: Request) => {
 
         if (fetchError || !tx) return new Response("Transaction Not Found", { status: 404, headers: corsHeaders });
 
-        // 🟢 ACTION: FORCE_RELEASE (Admin overrides Buyer)
+        // 🟢 ACTION: FORCE_RELEASE 
         if (action === "FORCE_RELEASE") {
             if (tx.status !== "FUNDED" && tx.status !== "DISPUTED") {
                 return new Response("Invalid transaction status", { status: 400, headers: corsHeaders });
             }
 
-            const payoutAmount = Number((tx.base_amount * 0.975).toFixed(2));
-            const payoutId = crypto.randomUUID();
+            const feePercentage = tx.applied_fee_percentage ?? 2.5; 
+            const feeMultiplier = feePercentage / 100;
             
-            await initiatePawaPayPayout(payoutId, tx.seller_phone, payoutAmount, tx.currency);
+            let primaryGross = tx.base_amount;
+            let secondaryGross = 0;
 
-            const { error: updateError } = await supabase.from("transactions").update({ 
-                status: "COMPLETED", 
-                pawapay_payout_id: payoutId,
-                admin_note: `Force released by admin: ${admin_note}` 
-            }).eq("id", tx.id);
+            if (tx.secondary_vendor_phone && tx.secondary_vendor_amount) {
+                secondaryGross = Number(tx.secondary_vendor_amount);
+                primaryGross = tx.base_amount - secondaryGross;
+            }
+
+            const secondaryFee = Math.round(secondaryGross * feeMultiplier);
+            const totalFee = Math.round(tx.base_amount * feeMultiplier);
+            const primaryFee = totalFee - secondaryFee; 
+
+            const primaryNet = primaryGross - primaryFee;
+            const secondaryNet = secondaryGross - secondaryFee;
+
+            // 🚀 THE FIX: True UUID generation for PawaPay
+            const primaryPayoutId = crypto.randomUUID();
+            const secondaryPayoutId = crypto.randomUUID();
+
+            const updatePayload: any = {
+                status: "PROCESSING_PAYOUTS",
+                admin_note: `Force release initiated by admin: ${admin_note}`,
+                primary_payout_status: "PROCESSING",
+                primary_payout_id: primaryPayoutId
+            };
+
+            if (tx.secondary_vendor_phone) {
+                updatePayload.secondary_payout_status = "PROCESSING";
+                updatePayload.secondary_payout_id = secondaryPayoutId;
+            }
+
+            const { error: updateError } = await supabase
+                .from("transactions")
+                .update(updatePayload)
+                .eq("id", tx.id);
 
             if (updateError) throw updateError;
 
-            await sendWhatsAppText(tx.seller_phone, `✅ *Fonds Libérés par l'Administration*\n\nSuite à l'examen de votre dossier, Clairtus a validé la transaction ${tx.reference}. Votre paiement est en route.`);
-            await sendWhatsAppText(tx.buyer_phone, `⚖️ *Décision Arbitrage*\n\nLa transaction ${tx.reference} a été clôturée par un administrateur après vérification de la livraison.`);
+            const payoutPromises = [];
+            payoutPromises.push(initiatePawaPayPayout(primaryPayoutId, tx.seller_phone, primaryNet, tx.currency));
 
-            return new Response(JSON.stringify({ success: true, message: "Fonds libérés avec succès" }), { 
+            if (tx.secondary_vendor_phone && secondaryNet > 0) {
+                payoutPromises.push(initiatePawaPayPayout(secondaryPayoutId, tx.secondary_vendor_phone, secondaryNet, tx.currency));
+            }
+
+            await Promise.allSettled(payoutPromises);
+
+            await sendWhatsAppText(tx.seller_phone, `✅ *Fonds en cours de libération*\n\nSuite à l'examen de votre dossier, Clairtus a validé la transaction ${tx.reference}. Votre paiement est en cours de traitement vers votre compte.`);
+            
+            if (tx.secondary_vendor_phone) {
+                await sendWhatsAppText(tx.secondary_vendor_phone, `✅ *Fonds en cours de libération*\n\nClairtus a validé une transaction incluant votre part. Votre paiement est en cours de traitement.`);
+            }
+
+            await sendWhatsAppText(tx.buyer_phone, `⚖️ *Décision Arbitrage*\n\nLa transaction ${tx.reference} a été clôturée par un administrateur. Les paiements ont été initiés.`);
+
+            return new Response(JSON.stringify({ success: true, message: "Payouts initiated successfully" }), { 
                 status: 200, 
                 headers: { ...corsHeaders, "Content-Type": "application/json" } 
             });
         }
 
-        // 🔴 ACTION: FORCE_REFUND (Admin returns money to Buyer)
+        // 🔴 ACTION: FORCE_REFUND (Admin returns money to Buyer - UNTOUCHED)
         if (action === "FORCE_REFUND") {
             if (tx.status !== "FUNDED" && tx.status !== "DISPUTED") {
                 return new Response("Invalid transaction status", { status: 400, headers: corsHeaders });
@@ -96,7 +138,7 @@ Deno.serve(async (req: Request) => {
 
     } catch (error) {
         console.error("🚨 [ADMIN ERROR]:", error);
-        return new Response(JSON.stringify({ error: error.message }), { 
+        return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), { 
             status: 500, 
             headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });

@@ -36,7 +36,7 @@ Deno.serve(async (req: Request) => {
     // 🟢 SCENARIO 1: ADMIN WINS FOR SELLER (Force Payout)
     if (resolution === "PAYOUT_SELLER") {
       const payoutAmount = Number((tx.base_amount * 0.975).toFixed(2)); // Subtract Clairtus Fee
-      await initiatePawaPayPayout(actionId, payoutAmount, tx.seller_phone);
+      await initiatePawaPayPayout(actionId, tx.seller_phone, payoutAmount, tx.currency);
       
       await supabase.from("transactions").update({ status: "COMPLETED", pawapay_payout_id: actionId }).eq("id", tx.id);
       
@@ -46,7 +46,7 @@ Deno.serve(async (req: Request) => {
     
     // 🔴 SCENARIO 2: ADMIN WINS FOR BUYER (Force Refund)
     else if (resolution === "REFUND_BUYER") {
-      await initiatePawaPayPayout(actionId, tx.base_amount, tx.buyer_phone);
+      await initiatePawaPayPayout(actionId, tx.buyer_phone, tx.base_amount, tx.currency);
       
       await supabase.from("transactions").update({ status: "REFUNDED" }).eq("id", tx.id);
       
@@ -62,6 +62,6 @@ Deno.serve(async (req: Request) => {
 
   } catch (error) {
     console.error("🚨 Admin Console Error:", error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 });
