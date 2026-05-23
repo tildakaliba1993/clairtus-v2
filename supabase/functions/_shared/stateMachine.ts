@@ -513,7 +513,21 @@ export async function processMessage(phone: string, text: string) {
             case "AWAITING_PAYMENT_BUYER":
                 if (cleanText === "CMD_PAYER" || cleanText.toUpperCase() === "PAYER" || cleanText === "CMD_RÉESSAYER" || cleanText.toUpperCase() === "RÉESSAYER" || cleanText.toUpperCase() === "REESSAYER") {
                     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
-                    await sendWhatsAppText(phone, MESSAGES.DEPOSIT_INITIATED);
+                    
+                    const netName = getNetworkName(phone);
+                    const fifteenMinsAgo = new Date(Date.now() - 15 * 60000).toISOString();
+                    
+                    const { count } = await supabase.from("network_events")
+                        .select("*", { count: "exact", head: true })
+                        .eq("network", netName)
+                        .gte("created_at", fifteenMinsAgo);
+
+                    let warning = "";
+                    if (count !== null && count >= 2) {
+                        warning = `\n\n⚠️ *ALERTE RÉSEAU :* Nous détectons actuellement des instabilités chez ${netName}. Le paiement peut nécessiter de patienter et de réessayer plus tard.`;
+                    }
+                    
+                    await sendWhatsAppText(phone, MESSAGES.DEPOSIT_INITIATED + warning);
         
         try {
                         const newDepositId = crypto.randomUUID();
