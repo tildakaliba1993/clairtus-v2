@@ -106,7 +106,11 @@ export default function AdminPortal() {
 
   const metrics = useMemo(() => {
     const float = transactions.filter(t => t.status === 'FUNDED').reduce((acc, t) => acc + (Number(t.base_amount) || 0), 0);
-    const revenue = transactions.filter(t => t.status === 'COMPLETED').reduce((acc, t) => acc + ((Number(t.base_amount) || 0) * 0.025), 0);
+    const revenue = transactions.filter(t => t.status === 'COMPLETED').reduce((acc, t) => {
+      const feeMultiplier = (t.applied_fee_percentage ?? 2.5) / 100;
+      const totalFee = Math.round((Number(t.base_amount) || 0) * feeMultiplier);
+      return acc + totalFee;
+    }, 0);
     const disputes = transactions.filter(t => t.status === 'DISPUTED').length;
     return { float, revenue, disputes };
   }, [transactions]);
