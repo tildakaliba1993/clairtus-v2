@@ -15,21 +15,18 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Clairtus | Le 1er Bot WhatsApp Tiers de Confiance en RDC (Airtel, Orange, M-Pesa)",
+  title: "Clairtus | Sécurisez vos transactions Mobile Money en RDC",
   description:
-    "Vendez et achetez en ligne sans vous faire arnaquer en République Démocratique du Congo. Clairtus est un Tiers de Confiance automatisé via WhatsApp qui sécurise l'argent via M-Pesa, Orange Money et Airtel Money jusqu'à la livraison.",
+    "Fini les arnaques et vendeurs fantômes. Clairtus sécurise vos paiements sur WhatsApp. L'argent n'est transféré qu'à la livraison. Démarrez !",
   keywords: [
-    "Clairtus",
-    "Tiers de Confiance",
-    "Escrow RDC",
-    "Paiement sécurisé Congo",
-    "Vendre en ligne RDC",
-    "Bot WhatsApp RDC",
+    "paiement sécurisé",
+    "Mobile Money",
     "M-Pesa RDC",
-    "Orange Money RDC",
-    "Airtel Money RDC",
-    "Anti-arnaque RDC",
-    "Kinshasa commerce",
+    "Orange Money",
+    "entiercement",
+    "garantie locative",
+    "commerce informel",
+    "éviter arnaque",
   ],
   authors: [{ name: "Clairtus" }],
   creator: "Clairtus",
@@ -39,9 +36,9 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   openGraph: {
-    title: "Clairtus | Protégez vos transactions Mobile Money en RDC",
+    title: "Clairtus | Sécurisez vos transactions Mobile Money en RDC",
     description:
-      "Achetez et vendez en toute sécurité à Kinshasa et partout en RDC. L'argent est bloqué par notre Bot WhatsApp jusqu'à la livraison.",
+      "Fini les arnaques et vendeurs fantômes. Clairtus sécurise vos paiements sur WhatsApp. L'argent n'est transféré qu'à la livraison. Démarrez !",
     url: "https://clairtus.com",
     siteName: "Clairtus",
     images: [
@@ -57,9 +54,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Clairtus | Protégez vos transactions en RDC",
+    title: "Clairtus | Sécurisez vos transactions Mobile Money en RDC",
     description:
-      "Le premier Tiers de Confiance 100% automatisé sur WhatsApp en RDC. Vendez sans risque.",
+      "Fini les arnaques et vendeurs fantômes. Clairtus sécurise vos paiements sur WhatsApp. L'argent n'est transféré qu'à la livraison. Démarrez !",
     images: ["/og-image.png"],
     creator: "@clairtus",
   },
