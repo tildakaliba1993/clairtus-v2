@@ -2,6 +2,7 @@
 import { getSupabaseClient } from "../_shared/supabaseClient.ts";
 import { sendWhatsAppText } from "../_shared/whatsappClient.ts";
 import { MESSAGES } from "../_shared/whatsappMessaging.ts";
+import { notifyAdmin } from "../_shared/adminAlerts.ts";
 
 function getNetworkName(phone: string) {
     const clean = phone.replace(/\+/g, '').replace(/\s/g, '');
@@ -55,6 +56,8 @@ Deno.serve(async (req: Request) => {
                 await sendWhatsAppText(tx.buyer_phone, MESSAGES.PAYMENT_SUCCESS_BUYER(tx.base_amount, tx.currency, generatedPin));
                 await supabase.from("sessions").update({ current_state: "AWAITING_DELIVERY_SELLER" }).eq("phone_number", tx.seller_phone);
                 await sendWhatsAppText(tx.seller_phone, MESSAGES.PAYMENT_SUCCESS_SELLER(tx.base_amount, tx.currency));
+                
+                await notifyAdmin("SUCCESS_DEPOSIT", `Un dépôt de ${tx.base_amount} ${tx.currency} a été sécurisé !`, tx.buyer_phone, tx.id);
                 
             } else if (status === "FAILED" || status === "REJECTED") {
                 console.log(`❌ Deposit FAILED for TX: ${tx.reference}`);
@@ -165,6 +168,8 @@ Deno.serve(async (req: Request) => {
                     console.error("Failed to update trust scores:", scoreError);
                 }
 
+                await notifyAdmin("SUCCESS_PAYOUT", `La transaction de ${tx.base_amount} ${tx.currency} est 100% terminée. Le vendeur a reçu ses fonds.`, tx.seller_phone, tx.id);
+
             } else if (isPartiallySettled) {
                 console.warn(`⚠️ [PARTIAL PAYOUT] TX ${tx.reference} is partially settled. Awaiting CRON retry.`);
                 await supabase.from("transactions").update({ status: "PARTIAL_PAYOUT" }).eq("id", tx.id);
@@ -182,6 +187,8 @@ Deno.serve(async (req: Request) => {
                 
                 await supabase.from("sessions").upsert({ phone_number: tx.seller_phone, current_state: "AWAITING_NEW_PAYOUT_NUMBER", draft_transaction_id: tx.id }, { onConflict: 'phone_number' });
                 await sendWhatsAppText(tx.seller_phone, `⚠️ *Échec du Transfert*\n\nL'opérateur a rejeté l'envoi de vos fonds. Raison possible: limite de solde atteinte ou compte inactif.\n\nVeuillez envoyer un **nouveau numéro Mobile Money** (ex: 243...) pour recevoir votre argent.`);
+                
+                await notifyAdmin("PAYOUT_FAILED", `Le réseau a rejeté l'envoi des fonds au vendeur.`, tx.seller_phone, tx.id);
             }
 
             return new Response("Payout Webhook Processed", { status: 200 });

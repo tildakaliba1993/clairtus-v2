@@ -4,6 +4,7 @@ import { getSupabaseClient } from "./supabaseClient.ts";
 import { sendWhatsAppText, sendWhatsAppButtons, sendWhatsAppTemplate } from "./whatsappClient.ts";
 import { MESSAGES } from "./whatsappMessaging.ts";
 import { initiatePawaPayPayout, initiatePawaPayDeposit } from "./pawapayClient.ts"; 
+import { notifyAdmin } from "./adminAlerts.ts";
 
 const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 2.5% de frais sur la vente.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n\nEn continuant, vous acceptez ces conditions.";
 
@@ -419,6 +420,12 @@ export async function processMessage(phone: string, text: string) {
             // 🚀 INVITATION ACCEPTANCE ROUTER
             case "INVITED_BUYER":
             case "INVITED_SELLER":
+                if (cleanText === "CMD_AIDE" || cleanText.toUpperCase() === "AIDE") {
+                    await sendWhatsAppText(phone, "🙋‍♂️ Un agent de support a été notifié et va vous contacter sous peu.");
+                    await notifyAdmin("HELP_NEEDED", "Un utilisateur demande de l'aide sur une invitation.", phone, session.draft_transaction_id);
+                    return;
+                }
+                
                 if (cleanText === "CMD_ACCEPTER" || cleanText.toUpperCase() === "ACCEPTER") {
                     
                     if (session.current_state === "INVITED_BUYER" && getNetworkName(phone) === "Airtel") {
@@ -671,6 +678,7 @@ export async function processMessage(phone: string, text: string) {
                         await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
                         await sendWhatsAppText(phone, `🚨 *ALERTE DE SÉCURITÉ*\n\nVous avez saisi un code PIN incorrect 3 fois. La transaction est maintenant bloquée et en statut LITIGE.\n\nNos agents de conformité vont examiner ce dossier.`);
                         await sendWhatsAppText(txFunded.buyer_phone, `🚨 *ALERTE DE SÉCURITÉ*\n\nLe vendeur a tenté de deviner votre code PIN 3 fois. La transaction a été immédiatement gelée pour protéger vos fonds.\n\nUn agent Clairtus va vous contacter sous peu.`);
+                        await notifyAdmin("DISPUTE", "Le vendeur a saisi un code PIN incorrect 3 fois de suite. Fonds gelés pour suspicion de fraude.", phone, txFunded.id);
                     } else {
                         await supabase.from("transactions").update({ pin_attempts: newAttempts }).eq("id", txFunded.id);
                         await sendWhatsAppText(phone, `❌ Code PIN incorrect.\n\n⚠️ *ATTENTION :* Il vous reste ${3 - newAttempts} tentative(s) avant le blocage définitif de la transaction pour fraude.`);
@@ -807,6 +815,7 @@ export async function processMessage(phone: string, text: string) {
                     await sendWhatsAppText(phone, "🚨 La transaction est en LITIGE. Nos agents gèlent les fonds et vont vous contacter.");
                     await sendWhatsAppText(cancelTx.buyer_phone, "🚨 Le vendeur a refusé l'annulation. Le dossier part en LITIGE. Nos agents vont vous contacter.");
                     await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", cancelTx.buyer_phone);
+                    await notifyAdmin("DISPUTE", "Le vendeur a refusé une demande d'annulation.", phone, cancelTx.id);
                 } else {
                     await sendWhatsAppText(phone, "Veuillez utiliser les boutons ACCEPTER ou REFUSER (LITIGE).");
                 }
@@ -821,7 +830,11 @@ export async function processMessage(phone: string, text: string) {
                         await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
                         await sendWhatsAppText(phone, "🚨 La transaction est maintenant en LITIGE. Les fonds sont strictement gelés. Notre équipe de conformité va vous contacter.");
                         await sendWhatsAppText(tx.seller_phone, `🚨 L'acheteur a ouvert un LITIGE sur la transaction ${tx.reference}. Les fonds sont gelés. Un agent Clairtus va vous contacter.`);
+                        await notifyAdmin("DISPUTE", "L'acheteur a ouvert un litige manuel pendant la livraison.", phone, tx.id);
                     }
+                } else if (cleanText === "CMD_AIDE" || cleanText.toUpperCase() === "AIDE") {
+                    await sendWhatsAppText(phone, "🙋‍♂️ Un agent de support a été notifié et va vous contacter sous peu.");
+                    await notifyAdmin("HELP_NEEDED", "L'acheteur demande de l'aide pendant la phase de livraison.", phone, session.draft_transaction_id);
                 } else {
                     await sendWhatsAppText(phone, "⏳ En attente de la livraison. Gardez précieusement votre code PIN.\n\n⚠️ En cas de problème grave avec le vendeur, tapez *LITIGE* pour geler les fonds.");
                 }
