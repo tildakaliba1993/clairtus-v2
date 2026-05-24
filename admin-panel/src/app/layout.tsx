@@ -40,6 +40,9 @@ export const metadata: Metadata = {
   },
 };
 
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -53,6 +56,7 @@ export default function RootLayout({
       {/* 🛡️ Added suppressHydrationWarning to ignore Grammarly/browser extensions */}
       <body suppressHydrationWarning={true} className="min-h-full flex flex-col font-sans antialiased">
         {children}
+        <ToastContainer position="top-right" autoClose={5000} theme="dark" />
       </body>
     </html>
   );

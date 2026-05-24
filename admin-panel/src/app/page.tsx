@@ -3,7 +3,8 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX, Search, Filter, DollarSign, Activity, AlertOctagon, X, Ban, Clock } from "lucide-react";
+import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX, Search, Filter, DollarSign, Activity, AlertOctagon, X, Ban, Clock, Bell } from "lucide-react";
+import { toast } from "react-toastify";
 
 export default function AdminPortal() {
   const [session, setSession] = useState(null);
@@ -19,12 +20,15 @@ export default function AdminPortal() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [selectedTx, setSelectedTx] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [isAlertsOpen, setIsAlertsOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
         fetchDashboardData();
+        fetchAlerts();
       }
       setLoading(false);
     });
@@ -33,10 +37,66 @@ export default function AdminPortal() {
       setSession(session);
       if (session) {
         fetchDashboardData();
+        fetchAlerts();
       }
     });
-    return () => subscription.unsubscribe();
+
+    // 📡 SUPABASE REALTIME SUBSCRIPTION FOR ALERTS
+    const channel = supabase
+      .channel('admin-alerts-channel')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'admin_alerts' },
+        (payload) => {
+          const newAlert = payload.new;
+          setAlerts(prev => [newAlert, ...prev]);
+
+          // Trigger Toast Notification based on Type
+          const toastMsg = `${newAlert.type}: ${newAlert.message}`;
+          if (newAlert.type === "SUCCESS_DEPOSIT" || newAlert.type === "SUCCESS_PAYOUT") {
+            toast.success(toastMsg, { icon: "💰" });
+          } else if (newAlert.type === "HELP_NEEDED") {
+            toast.info(toastMsg, { icon: "🙋‍♂️" });
+          } else if (newAlert.type === "DISPUTE" || newAlert.type === "PAYOUT_FAILED") {
+            toast.error(toastMsg, { icon: "🚨" });
+          } else {
+            toast(toastMsg);
+          }
+
+          // Fetch the latest transactions to ensure the dashboard stays up to date in real time
+          fetchDashboardData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+      supabase.removeChannel(channel);
+    };
   }, []);
+
+  const fetchAlerts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('admin_alerts')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(20);
+        
+      if (data) setAlerts(data);
+    } catch (err) {
+      console.error("Failed to fetch alerts", err);
+    }
+  };
+
+  const markAlertAsRead = async (alertId) => {
+    try {
+      await supabase.from('admin_alerts').update({ is_read: true }).eq('id', alertId);
+      setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, is_read: true } : a));
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -172,6 +232,8 @@ export default function AdminPortal() {
     );
   }
 
+  const unreadAlertsCount = alerts.filter(a => !a.is_read).length;
+
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200 font-sans pb-10">
       <header className="bg-gray-900 border-b border-gray-800 px-8 py-4 flex justify-between items-center sticky top-0 z-10 shadow-md">
@@ -179,7 +241,63 @@ export default function AdminPortal() {
           <ShieldAlert className="w-8 h-8 text-emerald-500" />
           <h1 className="text-xl font-bold text-white tracking-widest">CLAIRTUS <span className="text-emerald-500">COMMAND</span></h1>
         </div>
-        <button onClick={() => { supabase.auth.signOut(); }} className="flex items-center text-sm bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors"><LogOut className="w-4 h-4 mr-2" /> Déconnexion</button>
+        <div className="flex items-center space-x-4">
+          
+          {/* NOTIFICATION BELL */}
+          <div className="relative">
+            <button 
+              onClick={() => setIsAlertsOpen(!isAlertsOpen)} 
+              className="relative p-2 text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-full transition-colors"
+            >
+              <Bell className="w-5 h-5" />
+              {unreadAlertsCount > 0 && (
+                <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-lg">
+                  {unreadAlertsCount}
+                </span>
+              )}
+            </button>
+
+            {/* NOTIFICATION DROPDOWN */}
+            {isAlertsOpen && (
+              <div className="absolute right-0 mt-3 w-80 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-50">
+                <div className="bg-gray-950 border-b border-gray-800 p-3 flex justify-between items-center">
+                  <h3 className="font-bold text-sm text-white">Centre de Notifications</h3>
+                  <button onClick={() => setIsAlertsOpen(false)} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
+                </div>
+                <div className="max-h-[60vh] overflow-y-auto">
+                  {alerts.length === 0 ? (
+                    <div className="p-6 text-center text-gray-500 text-sm">Aucune notification</div>
+                  ) : (
+                    <div className="divide-y divide-gray-800">
+                      {alerts.map((alert) => (
+                        <div 
+                          key={alert.id} 
+                          onClick={() => { if (!alert.is_read) markAlertAsRead(alert.id); }}
+                          className={`p-4 cursor-pointer transition-colors ${alert.is_read ? 'bg-gray-900 opacity-70' : 'bg-gray-800/40 hover:bg-gray-800'}`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className="text-xl">
+                              {alert.type.includes("SUCCESS") ? "💰" : alert.type === "HELP_NEEDED" ? "🙋‍♂️" : "🚨"}
+                            </span>
+                            <div>
+                              <p className={`text-sm ${alert.is_read ? 'text-gray-400' : 'text-white font-medium'}`}>{alert.message}</p>
+                              <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500 font-mono">
+                                <span>{new Date(alert.created_at).toLocaleTimeString('fr-FR')}</span>
+                                {alert.phone_number && <span>+{alert.phone_number}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button onClick={() => { supabase.auth.signOut(); }} className="flex items-center text-sm bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors"><LogOut className="w-4 h-4 mr-2" /> Déconnexion</button>
+        </div>
       </header>
 
       <main className="p-8 max-w-7xl mx-auto space-y-6">
