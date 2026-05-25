@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import toast, { Toaster } from 'react-hot-toast';
@@ -11,7 +13,6 @@ export default function AdminAlertsListener() {
   useEffect(() => {
     console.log("🛡️ Overwatch Listener is active!");
 
-    // This opens a live connection to your admin_alerts table
     const channel = supabase
       .channel('admin-overwatch')
       .on(
@@ -21,7 +22,6 @@ export default function AdminAlertsListener() {
           const alert = payload.new;
           const alertText = `${alert.message}\nTel: +${alert.phone_number || "N/A"}`;
 
-          // These are the popups that will slide onto your screen
           if (alert.type.includes('SUCCESS')) {
             toast.success(alertText, { duration: 5000, style: { background: '#10B981', color: '#fff' } });
           } else if (alert.type === 'DISPUTE' || alert.type.includes('FAILED')) {
@@ -40,6 +40,5 @@ export default function AdminAlertsListener() {
     };
   }, []);
 
-  // This is the invisible container where the popups appear
   return <Toaster position="top-right" />;
 }
