@@ -1,5 +1,8 @@
 {
   "scripts": {
     "vercel-build": "next build"
+  },
+  "dependencies": {
+    "react-hot-toast": "^2.6.0"
   }
 }

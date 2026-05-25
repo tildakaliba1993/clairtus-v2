@@ -43,6 +43,9 @@ export const metadata: Metadata = {
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
+// 🛡️ 1. IMPORT YOUR NEW LISTENER HERE
+import AdminAlertsListener from "../components/AdminAlertsListener";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -53,8 +56,11 @@ export default function RootLayout({
       lang="fr"
       className={`${redHatDisplay.variable} ${geistMono.variable} h-full scroll-smooth antialiased`}
     >
-      {/* 🛡️ Added suppressHydrationWarning to ignore Grammarly/browser extensions */}
       <body suppressHydrationWarning={true} className="min-h-full flex flex-col font-sans antialiased">
+        
+        {/* 🛡️ 2. PLUG IN THE LISTENER HERE */}
+        <AdminAlertsListener />
+
         {children}
         <ToastContainer position="top-right" autoClose={5000} theme="dark" />
       </body>

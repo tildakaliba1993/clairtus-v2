@@ -113,3 +113,24 @@ export async function initiatePawaPayPayout(payoutId: string, phone: string, amo
 
     return await response.json();
 }
+
+// 🔧 NEW FUNCTION: Checks the real-time status of a deposit for the Sweeper
+export async function checkPawaPayDepositStatus(depositId: string) {
+    console.log(`[PawaPay] Checking real-time status for deposit: ${depositId}`);
+    
+    const response = await fetch(`${PAWAPAY_BASE_URL}/v1/deposits/${depositId}`, {
+        method: "GET",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${PAWAPAY_JWT}`
+        }
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Status Check Error: ${errorText}`);
+        throw new Error(`PawaPay Rejected Status Check: ${errorText}`);
+    }
+
+    return await response.json(); 
+}

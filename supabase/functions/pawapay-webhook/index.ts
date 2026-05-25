@@ -1,8 +1,9 @@
 // supabase/functions/pawapay-webhook/index.ts
 import { getSupabaseClient } from "../_shared/supabaseClient.ts";
-import { sendWhatsAppText } from "../_shared/whatsappClient.ts";
+import { sendWhatsAppText, sendWhatsAppButtons } from "../_shared/whatsappClient.ts";
 import { MESSAGES } from "../_shared/whatsappMessaging.ts";
 import { notifyAdmin } from "../_shared/adminAlerts.ts";
+import { getNetworkInfo } from "../_shared/stateMachine.ts";
 
 function getNetworkName(phone: string) {
     const clean = phone.replace(/\+/g, '').replace(/\s/g, '');
@@ -21,7 +22,7 @@ Deno.serve(async (req: Request) => {
         const supabase = getSupabaseClient();
         const status = body.status;
 
-        // 🟢 SCENARIO 1: IT IS A DEPOSIT WEBHOOK (Buyer funding escrow - UNTOUCHED)
+        // 🟢 SCENARIO 1: IT IS A DEPOSIT WEBHOOK (Buyer funding escrow)
         if (body.depositId) {
             const depositId = body.depositId;
             const { data: tx, error: txError } = await supabase.from("transactions").select("*").eq("pawapay_deposit_id", depositId).single();
@@ -62,13 +63,33 @@ Deno.serve(async (req: Request) => {
             } else if (status === "FAILED" || status === "REJECTED") {
                 console.log(`❌ Deposit FAILED for TX: ${tx.reference}`);
                 await supabase.from("network_events").insert({ network: getNetworkName(tx.buyer_phone), event_type: "DEPOSIT_FAILED" });
-                await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", tx.buyer_phone);
-                await sendWhatsAppText(tx.buyer_phone, MESSAGES.PAYMENT_FAILED_BUYER);
+                
+                // 🔧 CIRCUIT BREAKER COUNTER LOGIC
+                const attempts = (tx.payment_attempts || 0) + 1;
+                
+                if (attempts >= 3) {
+                    const { current, alternative } = getNetworkInfo(tx.buyer_phone);
+                    const circuitBreakerMsg = `⚠️ *Oups ! Il semble que le réseau ${current} rencontre des perturbations techniques nationales en ce moment.*\n\nPour ne pas perdre votre transaction, que souhaitez-vous faire ?`;
+                    
+                    await supabase.from("transactions").update({ status: "AWAITING_PAYMENT", payment_attempts: attempts }).eq("id", tx.id);
+                    await supabase.from("sessions").update({ current_state: "CIRCUIT_BREAKER_MENU" }).eq("phone_number", tx.buyer_phone);
+                    
+                    await sendWhatsAppButtons(tx.buyer_phone, circuitBreakerMsg, [
+                        { id: "CMD_SWITCH_MNO", title: `1️⃣ Avec ${alternative}` },
+                        { id: "CMD_PAUSE", title: "2️⃣ Attendre" },
+                        { id: "CMD_CANCEL", title: "3️⃣ Annuler" }
+                    ]);
+                } else {
+                    await supabase.from("transactions").update({ status: "AWAITING_PAYMENT", payment_attempts: attempts }).eq("id", tx.id);
+                    await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", tx.buyer_phone);
+                    
+                    await sendWhatsAppText(tx.buyer_phone, `❌ *Échec du paiement.*\n\nLe paiement Mobile Money a échoué (solde insuffisant ou délai dépassé). Vérifiez votre solde et tapez *RÉESSAYER*.`);
+                }
             }
             return new Response("Deposit Webhook Processed", { status: 200 });
         }
 
-        // 🟢 SCENARIO 2: IT IS A PAYOUT WEBHOOK (Vendor receiving funds - UPDATED FOR SPLIT PAYOUTS)
+        // 🟢 SCENARIO 2: IT IS A PAYOUT WEBHOOK (Vendor receiving funds)
         else if (body.payoutId) {
             const payoutId = body.payoutId;
             
