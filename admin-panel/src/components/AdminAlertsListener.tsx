@@ -1,17 +1,28 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import toast, { Toaster } from 'react-hot-toast';
+import { toast } from 'react-toastify';
 
-// This connects your frontend to your Supabase database
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || "";
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export default function AdminAlertsListener() {
   useEffect(() => {
     console.log("🛡️ Overwatch Listener is active!");
+
+    // Load initial unread notifications on mount
+    supabase
+      .from('admin_alerts')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10)
+      .then(({ data }) => {
+        if (data) {
+          window.dispatchEvent(new CustomEvent('sync-alerts', { detail: data }));
+        }
+      });
 
     const channel = supabase
       .channel('admin-overwatch')
@@ -19,18 +30,22 @@ export default function AdminAlertsListener() {
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'admin_alerts' },
         (payload) => {
-          const alert = payload.new;
+          const alert = payload.new as any; 
           const alertText = `${alert.message}\nTel: +${alert.phone_number || "N/A"}`;
 
+          // 1. Push popup toast notification
           if (alert.type.includes('SUCCESS')) {
-            toast.success(alertText, { duration: 5000, style: { background: '#10B981', color: '#fff' } });
+            toast.success(alertText);
           } else if (alert.type === 'DISPUTE' || alert.type.includes('FAILED')) {
-            toast.error(alertText, { duration: 10000, style: { background: '#EF4444', color: '#fff' } });
+            toast.error(alertText);
           } else if (alert.type === 'HELP_NEEDED') {
-            toast(alertText, { icon: '🙋‍♂️', duration: 8000, style: { background: '#F59E0B', color: '#fff' } });
+            toast.warning(alertText);
           } else {
-            toast(alertText);
+            toast.info(alertText);
           }
+
+          // 2. Broadcast to the Notification Center dropdown UI
+          window.dispatchEvent(new CustomEvent('new-alert', { detail: alert }));
         }
       )
       .subscribe();
@@ -40,5 +55,24 @@ export default function AdminAlertsListener() {
     };
   }, []);
 
-  return <Toaster position="top-right" />;
+  return null; 
+}
+
+// 🔧 CUSTOM HOOK: Use this inside your Dropdown Menu file to get real-time lists!
+export function useAdminAlerts() {
+  const [alerts, setAlerts] = useState<any[]>([]);
+
+  useEffect(() => {
+    const handleSync = (e: any) => setAlerts(e.detail);
+    const handleNew = (e: any) => setAlerts((prev) => [e.detail, ...prev]);
+
+    window.addEventListener('sync-alerts', handleSync);
+    window.addEventListener('new-alert', handleNew);
+    return () => {
+      window.removeEventListener('sync-alerts', handleSync);
+      window.removeEventListener('new-alert', handleNew);
+    };
+  }, []);
+
+  return alerts;
 }

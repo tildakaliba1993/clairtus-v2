@@ -569,6 +569,17 @@ export default function Home() {
           {content.footer.description}
         </p>
         <p className="mt-3 text-xs text-slate-500">{content.footer.rights}</p>
+        
+        {/* 🛡️ COMPLIANCE: Legal Navigation Links */}
+        <div className="mt-6 flex items-center justify-center space-x-6 text-sm text-slate-400">
+          <Link href="/terms" className="hover:text-white transition-colors duration-200">
+            Conditions d'utilisation
+          </Link>
+          <span className="text-white/20">|</span>
+          <Link href="/privacy" className="hover:text-white transition-colors duration-200">
+            Politique de confidentialité
+          </Link>
+        </div>
       </footer>
     </div>
   );

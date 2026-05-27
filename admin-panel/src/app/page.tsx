@@ -2,8 +2,9 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import Image from "next/image";
 import { supabase } from "@/lib/supabase";
-import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX, Search, Filter, DollarSign, Activity, AlertOctagon, X, Ban, Clock, Bell } from "lucide-react";
+import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX, Search, Filter, DollarSign, Activity, AlertOctagon, X, Ban, Clock, Bell, ChevronLeft, ChevronRight, ArrowUpDown } from "lucide-react";
 import { toast } from "react-toastify";
 
 export default function AdminPortal() {
@@ -17,8 +18,15 @@ export default function AdminPortal() {
   const [userMap, setUserMap] = useState({});
   const [actionLoading, setActionLoading] = useState(null);
 
+  // 🚀 FILTERS & SORTING
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [sortOrder, setSortOrder] = useState("NEWEST"); // NEWEST, OLDEST, HIGHEST
+  
+  // 🚀 PAGINATION
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   const [selectedTx, setSelectedTx] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
@@ -175,15 +183,38 @@ export default function AdminPortal() {
     return { float, revenue, disputes };
   }, [transactions]);
 
-  const filteredTxs = useMemo(() => {
-    return transactions.filter(t => {
+  // 🚀 RESET PAGINATION WHEN FILTERS CHANGE
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, sortOrder]);
+
+  const sortedAndFilteredTxs = useMemo(() => {
+    let filtered = transactions.filter(t => {
       const matchesSearch = (t.reference?.toLowerCase().includes(searchTerm.toLowerCase()) || 
                              t.seller_phone?.includes(searchTerm) || 
                              t.buyer_phone?.includes(searchTerm));
       const matchesStatus = statusFilter === "ALL" || t.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [transactions, searchTerm, statusFilter]);
+
+    // Handle Sorting
+    filtered.sort((a, b) => {
+      if (sortOrder === "NEWEST") {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      } else if (sortOrder === "OLDEST") {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else if (sortOrder === "HIGHEST") {
+        return (Number(b.base_amount) || 0) - (Number(a.base_amount) || 0);
+      }
+      return 0;
+    });
+
+    return filtered;
+  }, [transactions, searchTerm, statusFilter, sortOrder]);
+
+  // 🚀 CALCULATE PAGINATION DATA
+  const totalPages = Math.ceil(sortedAndFilteredTxs.length / itemsPerPage);
+  const currentItems = sortedAndFilteredTxs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const renderUserCell = (phone) => {
     if (!phone) return <span className="text-gray-500">-</span>;
@@ -214,18 +245,19 @@ export default function AdminPortal() {
 
   if (!session) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950 p-4">
-        <div className="max-w-md w-full bg-gray-900 rounded-xl shadow-2xl border border-gray-800 p-8">
+      <div className="min-h-screen flex items-center justify-center bg-[#020617] p-4">
+        <div className="max-w-md w-full bg-[#0b141a] rounded-xl shadow-2xl border border-white/10 p-8">
           <div className="flex flex-col items-center mb-8">
-            <div className="bg-emerald-500/10 p-4 rounded-full mb-4"><ShieldAlert className="w-12 h-12 text-emerald-500" /></div>
-            <h1 className="text-2xl font-bold text-white tracking-wider">CLAIRTUS COMMAND</h1>
+            <div className="mb-4">
+              <Image src="/logo-clairtus.svg" alt="Clairtus" width={180} height={45} priority className="h-[45px] w-auto" />
+            </div>
             <p className="text-gray-400 text-sm mt-2">Accès restreint à l&apos;administration</p>
           </div>
-          {error && <div className="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg text-sm mb-6 text-center">{error}</div>}
+          {error && <div className="bg-red-500/10 border border-red-500/50 text-red-500 p-3 rounded-lg text-sm mb-6 text-center">{error}</div>}
           <form onSubmit={handleLogin} className="space-y-6">
-            <div><input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-white focus:border-emerald-500 outline-none" required /></div>
-            <div><input type="password" placeholder="Mot de passe" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-3 text-white focus:border-emerald-500 outline-none" required /></div>
-            <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg"><Lock className="w-5 h-5 inline mr-2" /> Déverrouiller</button>
+            <div><input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#202c33] border border-white/10 rounded-lg px-4 py-3 text-white focus:border-emerald-500 outline-none transition-colors" required /></div>
+            <div><input type="password" placeholder="Mot de passe" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#202c33] border border-white/10 rounded-lg px-4 py-3 text-white focus:border-emerald-500 outline-none transition-colors" required /></div>
+            <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg transition-colors"><Lock className="w-5 h-5 inline mr-2" /> Déverrouiller</button>
           </form>
         </div>
       </div>
@@ -235,11 +267,11 @@ export default function AdminPortal() {
   const unreadAlertsCount = alerts.filter(a => !a.is_read).length;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-200 font-sans pb-10">
-      <header className="bg-gray-900 border-b border-gray-800 px-8 py-4 flex justify-between items-center sticky top-0 z-10 shadow-md">
-        <div className="flex items-center space-x-3">
-          <ShieldAlert className="w-8 h-8 text-emerald-500" />
-          <h1 className="text-xl font-bold text-white tracking-widest">CLAIRTUS <span className="text-emerald-500">COMMAND</span></h1>
+    <div className="min-h-screen bg-[#020617] text-gray-200 font-sans pb-10">
+      <header className="bg-[#0b141a] border-b border-white/10 px-8 py-4 flex justify-between items-center sticky top-0 z-10 shadow-md">
+        <div className="flex items-center">
+          <Image src="/logo-clairtus.svg" alt="Clairtus Command" width={140} height={35} className="h-[35px] w-auto" />
+          <span className="ml-3 px-2 py-0.5 bg-red-500/10 text-red-500 text-[10px] font-bold rounded uppercase tracking-widest border border-red-500/20">Command</span>
         </div>
         <div className="flex items-center space-x-4">
           
@@ -247,7 +279,7 @@ export default function AdminPortal() {
           <div className="relative">
             <button 
               onClick={() => setIsAlertsOpen(!isAlertsOpen)} 
-              className="relative p-2 text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-full transition-colors"
+              className="relative p-2 text-gray-400 hover:text-white bg-[#202c33] hover:bg-[#2a3942] rounded-full transition-colors border border-white/5"
             >
               <Bell className="w-5 h-5" />
               {unreadAlertsCount > 0 && (
@@ -259,8 +291,8 @@ export default function AdminPortal() {
 
             {/* NOTIFICATION DROPDOWN */}
             {isAlertsOpen && (
-              <div className="absolute right-0 mt-3 w-80 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-50">
-                <div className="bg-gray-950 border-b border-gray-800 p-3 flex justify-between items-center">
+              <div className="absolute right-0 mt-3 w-80 bg-[#0b141a] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
+                <div className="bg-[#202c33] border-b border-white/10 p-3 flex justify-between items-center">
                   <h3 className="font-bold text-sm text-white">Centre de Notifications</h3>
                   <button onClick={() => setIsAlertsOpen(false)} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
                 </div>
@@ -268,12 +300,12 @@ export default function AdminPortal() {
                   {alerts.length === 0 ? (
                     <div className="p-6 text-center text-gray-500 text-sm">Aucune notification</div>
                   ) : (
-                    <div className="divide-y divide-gray-800">
+                    <div className="divide-y divide-white/5">
                       {alerts.map((alert) => (
                         <div 
                           key={alert.id} 
                           onClick={() => { if (!alert.is_read) markAlertAsRead(alert.id); }}
-                          className={`p-4 cursor-pointer transition-colors ${alert.is_read ? 'bg-gray-900 opacity-70' : 'bg-gray-800/40 hover:bg-gray-800'}`}
+                          className={`p-4 cursor-pointer transition-colors ${alert.is_read ? 'bg-[#0b141a] opacity-70' : 'bg-[#202c33]/50 hover:bg-[#202c33]'}`}
                         >
                           <div className="flex items-start gap-3">
                             <span className="text-xl">
@@ -296,50 +328,71 @@ export default function AdminPortal() {
             )}
           </div>
 
-          <button onClick={() => { supabase.auth.signOut(); }} className="flex items-center text-sm bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg transition-colors"><LogOut className="w-4 h-4 mr-2" /> Déconnexion</button>
+          <button onClick={() => { supabase.auth.signOut(); }} className="flex items-center text-sm bg-[#202c33] hover:bg-[#2a3942] border border-white/5 px-4 py-2 rounded-lg transition-colors"><LogOut className="w-4 h-4 mr-2" /> Déconnexion</button>
         </div>
       </header>
 
       <main className="p-8 max-w-7xl mx-auto space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-gray-900 border border-gray-800 p-6 rounded-xl flex items-center justify-between">
+          <div className="bg-[#0b141a] border border-white/10 p-6 rounded-xl flex items-center justify-between">
             <div><p className="text-sm text-gray-400">Fonds en Séquestre (Float)</p><p className="text-2xl font-bold text-blue-400">${metrics.float.toFixed(2)}</p></div>
             <div className="bg-blue-500/10 p-3 rounded-lg"><DollarSign className="w-6 h-6 text-blue-500" /></div>
           </div>
-          <div className="bg-gray-900 border border-gray-800 p-6 rounded-xl flex items-center justify-between">
+          <div className="bg-[#0b141a] border border-white/10 p-6 rounded-xl flex items-center justify-between">
             <div><p className="text-sm text-gray-400">Revenus Générés (2.5%)</p><p className="text-2xl font-bold text-emerald-400">${metrics.revenue.toFixed(2)}</p></div>
             <div className="bg-emerald-500/10 p-3 rounded-lg"><Activity className="w-6 h-6 text-emerald-500" /></div>
           </div>
-          <div className="bg-gray-900 border border-gray-800 p-6 rounded-xl flex items-center justify-between">
+          <div className="bg-[#0b141a] border border-white/10 p-6 rounded-xl flex items-center justify-between">
             <div><p className="text-sm text-gray-400">Litiges Actifs</p><p className="text-2xl font-bold text-red-500">{metrics.disputes}</p></div>
             <div className="bg-red-500/10 p-3 rounded-lg"><AlertOctagon className="w-6 h-6 text-red-500" /></div>
           </div>
         </div>
 
-        <div className="flex flex-col md:flex-row justify-between items-center bg-gray-900 border border-gray-800 p-4 rounded-xl gap-4">
-          <div className="flex w-full md:w-1/2 space-x-4">
-            <div className="relative w-full">
+        <div className="flex flex-col lg:flex-row justify-between items-center bg-[#0b141a] border border-white/10 p-4 rounded-xl gap-4">
+          <div className="flex flex-col md:flex-row w-full lg:w-3/4 gap-4">
+            
+            {/* Search Bar */}
+            <div className="relative w-full md:w-1/3">
               <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-500" />
-              <input type="text" placeholder="Rechercher ID ou Téléphone..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg pl-10 pr-4 py-2 text-white focus:border-emerald-500 outline-none" />
+              <input type="text" placeholder="Rechercher ID ou Téléphone..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-[#202c33] border border-white/5 rounded-lg pl-10 pr-4 py-2 text-white focus:border-emerald-500 outline-none" />
             </div>
-            <div className="relative min-w-[150px]">
+            
+            {/* Extended Status Filter */}
+            <div className="relative w-full md:w-48">
               <Filter className="absolute left-3 top-2.5 w-5 h-5 text-gray-500" />
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full bg-gray-950 border border-gray-800 rounded-lg pl-10 pr-4 py-2 text-white appearance-none focus:border-emerald-500 outline-none">
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full bg-[#202c33] border border-white/5 rounded-lg pl-10 pr-4 py-2 text-white appearance-none focus:border-emerald-500 outline-none cursor-pointer">
                 <option value="ALL">Tous les statuts</option>
-                <option value="DISPUTED">⚠️ Litiges</option>
+                <option value="DRAFT">📝 Brouillon</option>
+                <option value="INITIATED">⏳ Initié</option>
+                <option value="PENDING_FUNDING">⌛ Attente Paiement</option>
                 <option value="FUNDED">🔒 Financé</option>
-                <option value="PENDING_FUNDING">⏳ En attente</option>
+                <option value="PROCESSING_PAYOUTS">🔄 Envoi en cours</option>
                 <option value="COMPLETED">✅ Complété</option>
+                <option value="DISPUTED">⚠️ Litige</option>
+                <option value="REFUNDED">💸 Remboursé</option>
+                <option value="CANCELLED">🚫 Annulé</option>
               </select>
             </div>
+
+            {/* Sorting Dropdown */}
+            <div className="relative w-full md:w-48">
+              <ArrowUpDown className="absolute left-3 top-2.5 w-5 h-5 text-gray-500" />
+              <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full bg-[#202c33] border border-white/5 rounded-lg pl-10 pr-4 py-2 text-white appearance-none focus:border-emerald-500 outline-none cursor-pointer">
+                <option value="NEWEST">Plus récents</option>
+                <option value="OLDEST">Plus anciens</option>
+                <option value="HIGHEST">Montant décroissant</option>
+              </select>
+            </div>
+
           </div>
-          <button onClick={() => { fetchDashboardData(); }} className="flex items-center text-sm bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg"><RefreshCw className="w-4 h-4 mr-2" /> Actualiser</button>
+          
+          <button onClick={() => { fetchDashboardData(); }} className="flex items-center w-full lg:w-auto justify-center text-sm bg-[#202c33] hover:bg-[#2a3942] border border-white/5 px-4 py-2 rounded-lg transition-colors"><RefreshCw className="w-4 h-4 mr-2" /> Actualiser</button>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
+        <div className="bg-[#0b141a] border border-white/10 rounded-xl overflow-hidden shadow-xl">
+          <div className="overflow-x-auto min-h-[400px]">
             <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-gray-950/50 border-b border-gray-800 text-gray-400">
+              <thead className="bg-[#202c33]/50 border-b border-white/5 text-gray-400">
                 <tr>
                   <th className="px-6 py-4 font-medium">Référence</th>
                   <th className="px-6 py-4 font-medium">Vendeur</th>
@@ -348,23 +401,23 @@ export default function AdminPortal() {
                   <th className="px-6 py-4 font-medium">Statut</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-800">
-                {filteredTxs.length === 0 ? (
-                  <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Aucun résultat.</td></tr>
+              <tbody className="divide-y divide-white/5">
+                {currentItems.length === 0 ? (
+                  <tr><td colSpan={5} className="px-6 py-12 text-center text-gray-500">Aucun résultat trouvé.</td></tr>
                 ) : (
-                  filteredTxs.map((tx) => (
-                    <tr key={tx.id} onClick={() => { setSelectedTx(tx); }} className="hover:bg-gray-800/80 transition-colors cursor-pointer group">
+                  currentItems.map((tx) => (
+                    <tr key={tx.id} onClick={() => { setSelectedTx(tx); }} className="hover:bg-[#202c33] transition-colors cursor-pointer group">
                       <td className="px-6 py-4 font-mono text-emerald-400 group-hover:underline">{tx.reference}</td>
                       <td className="px-6 py-4">{renderUserCell(tx.seller_phone)}</td>
                       <td className="px-6 py-4">{renderUserCell(tx.buyer_phone)}</td>
                       <td className="px-6 py-4 font-semibold text-white">{tx.base_amount ? `${tx.base_amount} ${tx.currency}` : "-"}</td>
                       <td className="px-6 py-4">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium flex w-fit items-center gap-1
-                          ${tx.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20' : ''}
-                          ${tx.status === 'FUNDED' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : ''}
-                          ${tx.status === 'DISPUTED' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : ''}
-                          ${tx.status === 'CANCELLED' || tx.status === 'REFUNDED' ? 'bg-gray-500/10 text-gray-400 border border-gray-500/20' : ''}
-                          ${['INITIATED', 'PENDING_FUNDING', 'DRAFT'].includes(tx.status) ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : ''}
+                        <span className={`px-3 py-1 rounded-full text-[10px] uppercase font-bold tracking-wider flex w-fit items-center gap-1 border
+                          ${tx.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : ''}
+                          ${tx.status === 'FUNDED' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : ''}
+                          ${tx.status === 'DISPUTED' ? 'bg-red-500/10 text-red-500 border-red-500/20' : ''}
+                          ${tx.status === 'CANCELLED' || tx.status === 'REFUNDED' ? 'bg-gray-500/10 text-gray-400 border-white/10' : ''}
+                          ${['INITIATED', 'PENDING_FUNDING', 'DRAFT', 'PROCESSING_PAYOUTS'].includes(tx.status) ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : ''}
                         `}>
                           {tx.status}
                         </span>
@@ -375,15 +428,40 @@ export default function AdminPortal() {
               </tbody>
             </table>
           </div>
+          
+          {/* 🚀 PAGINATION FOOTER */}
+          {totalPages > 1 && (
+            <div className="bg-[#0b141a] border-t border-white/5 px-6 py-4 flex items-center justify-between">
+              <span className="text-sm text-gray-400">
+                Page {currentPage} sur {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setCurrentPage(prev => Math.max(1, prev - 1)); }}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-lg bg-[#202c33] border border-white/5 text-gray-300 hover:bg-[#2a3942] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setCurrentPage(prev => Math.min(totalPages, prev + 1)); }}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-lg bg-[#202c33] border border-white/5 text-gray-300 hover:bg-[#2a3942] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
       {/* ENHANCED AUDIT TRAIL MODAL */}
       {selectedTx && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-900 border border-gray-800 rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+          <div className="bg-[#0b141a] border border-white/10 rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
             {/* Header */}
-            <div className="flex justify-between items-center border-b border-gray-800 p-6 sticky top-0 bg-gray-900 z-10">
+            <div className="flex justify-between items-center border-b border-white/5 p-6 sticky top-0 bg-[#0b141a]/95 backdrop-blur z-10">
               <div className="flex items-center gap-4">
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   Dossier: <span className="font-mono text-emerald-500">{selectedTx.reference}</span>
@@ -392,7 +470,7 @@ export default function AdminPortal() {
                   ${selectedTx.status === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 
                     selectedTx.status === 'DISPUTED' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
                     selectedTx.status === 'FUNDED' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
-                    'bg-gray-500/10 text-gray-400 border-gray-500/20'}`}>
+                    'bg-gray-500/10 text-gray-400 border-white/10'}`}>
                   {selectedTx.status}
                 </span>
               </div>
@@ -404,12 +482,12 @@ export default function AdminPortal() {
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Acteurs de la transaction</h3>
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-gray-950 p-4 rounded-lg border border-gray-800">
-                    <p className="text-xs text-gray-500 mb-1">Vendeur (Bénéficiaire)</p>
+                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
+                    <p className="text-xs text-gray-400 mb-1">Vendeur (Bénéficiaire)</p>
                     <p className="font-mono text-white text-lg">{selectedTx.seller_phone || "Non défini"}</p>
                   </div>
-                  <div className="bg-gray-950 p-4 rounded-lg border border-gray-800">
-                    <p className="text-xs text-gray-500 mb-1">Acheteur (Payeur)</p>
+                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
+                    <p className="text-xs text-gray-400 mb-1">Acheteur (Payeur)</p>
                     <p className="font-mono text-white text-lg">{selectedTx.buyer_phone || "Non défini"}</p>
                   </div>
                 </div>
@@ -419,16 +497,16 @@ export default function AdminPortal() {
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Détails Financiers & Techniques</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div className="bg-gray-950 p-4 rounded-lg border border-gray-800">
-                    <p className="text-gray-500 mb-1 text-xs">Montant</p>
+                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
+                    <p className="text-gray-400 mb-1 text-xs">Montant</p>
                     <p className="font-bold text-white text-lg">{selectedTx.base_amount} {selectedTx.currency}</p>
                   </div>
-                  <div className="bg-gray-950 p-4 rounded-lg border border-gray-800">
-                    <p className="text-gray-500 mb-1 text-xs">Tentatives PIN</p>
+                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
+                    <p className="text-gray-400 mb-1 text-xs">Tentatives PIN</p>
                     <p className={`font-bold text-lg ${(selectedTx.pin_attempts || 0) >= 3 ? 'text-red-500' : 'text-white'}`}>{selectedTx.pin_attempts || 0} / 3</p>
                   </div>
-                  <div className="bg-gray-950 p-4 rounded-lg border border-gray-800 col-span-2">
-                    <p className="text-gray-500 mb-1 text-xs">Description du bien</p>
+                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5 col-span-2">
+                    <p className="text-gray-400 mb-1 text-xs">Description du bien</p>
                     <p className="text-white italic">&quot;{selectedTx.item_description}&quot;</p>
                   </div>
                 </div>
@@ -437,9 +515,9 @@ export default function AdminPortal() {
               {/* Audit Trail Timeline */}
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Piste d&apos;Audit (Audit Trail)</h3>
-                <div className="bg-gray-950 border border-gray-800 rounded-lg p-5 space-y-6 relative">
+                <div className="bg-[#202c33] border border-white/5 rounded-lg p-5 space-y-6 relative">
                   {/* Vertical Line */}
-                  <div className="absolute left-[31px] top-8 bottom-8 w-px bg-gray-800"></div>
+                  <div className="absolute left-[31px] top-8 bottom-8 w-px bg-white/10"></div>
 
                   {/* Event 1 */}
                   {selectedTx.created_at && (
@@ -487,7 +565,7 @@ export default function AdminPortal() {
                   <div className="flex items-start gap-4 relative z-10">
                     <div className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 mt-0.5
                       ${selectedTx.status === 'COMPLETED' ? 'bg-emerald-500/20 border-emerald-500' : 
-                        selectedTx.status === 'DISPUTED' ? 'bg-red-500/20 border-red-500' : 'bg-gray-500/20 border-gray-500'}`}
+                        selectedTx.status === 'DISPUTED' ? 'bg-red-500/20 border-red-500' : 'bg-white/10 border-white/20'}`}
                     >
                       <Clock className={`w-3 h-3 
                         ${selectedTx.status === 'COMPLETED' ? 'text-emerald-400' : 
@@ -502,7 +580,7 @@ export default function AdminPortal() {
               </div>
 
               {/* Actions Footer */}
-              <div className="flex flex-col md:flex-row gap-6 border-t border-gray-800 pt-6">
+              <div className="flex flex-col md:flex-row gap-6 border-t border-white/10 pt-6">
                 <div className="flex-1 space-y-3">
                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sécurité Utilisateurs</h3>
                   <div className="flex gap-2">
@@ -511,7 +589,7 @@ export default function AdminPortal() {
                         if (selectedTx.id) handleAdminAction(selectedTx.id, "BAN_USER", selectedTx.seller_phone || "");
                       }} 
                       disabled={actionLoading === selectedTx.seller_phone || !selectedTx.seller_phone} 
-                      className="flex-1 bg-red-950/30 hover:bg-red-900/50 text-red-500 border border-red-900/50 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center transition-colors disabled:opacity-30"
+                      className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center transition-colors disabled:opacity-30"
                     >
                       <Ban className="w-4 h-4 mr-2" /> Vendeur
                     </button>
@@ -520,7 +598,7 @@ export default function AdminPortal() {
                         if (selectedTx.id) handleAdminAction(selectedTx.id, "BAN_USER", selectedTx.buyer_phone || "");
                       }} 
                       disabled={actionLoading === selectedTx.buyer_phone || !selectedTx.buyer_phone} 
-                      className="flex-1 bg-red-950/30 hover:bg-red-900/50 text-red-500 border border-red-900/50 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center transition-colors disabled:opacity-30"
+                      className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/20 py-2.5 rounded-lg text-xs font-medium flex items-center justify-center transition-colors disabled:opacity-30"
                     >
                       <Ban className="w-4 h-4 mr-2" /> Acheteur
                     </button>
@@ -528,7 +606,7 @@ export default function AdminPortal() {
                 </div>
 
                 {(selectedTx.status === "FUNDED" || selectedTx.status === "DISPUTED") && (
-                  <div className="flex-1 space-y-3 border-t md:border-t-0 md:border-l border-gray-800 md:pl-6 pt-4 md:pt-0">
+                  <div className="flex-1 space-y-3 border-t md:border-t-0 md:border-l border-white/10 md:pl-6 pt-4 md:pt-0">
                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Arbitrage Financier</h3>
                     <div className="flex gap-2">
                       <button 
@@ -545,7 +623,7 @@ export default function AdminPortal() {
                           if (selectedTx.id) handleAdminAction(selectedTx.id, "FORCE_REFUND", "");
                         }} 
                         disabled={actionLoading === selectedTx.id} 
-                        className="flex-1 bg-gray-800 hover:bg-gray-700 text-white border border-gray-700 py-2.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center"
+                        className="flex-1 bg-[#202c33] hover:bg-[#2a3942] text-white border border-white/10 py-2.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center"
                       >
                         <XCircle className="w-4 h-4 mr-1.5"/> Rembourser
                       </button>

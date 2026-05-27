@@ -69,7 +69,9 @@ Deno.serve(async (req: Request) => {
                 
                 if (attempts >= 3) {
                     const { current, alternative } = getNetworkInfo(tx.buyer_phone);
-                    const circuitBreakerMsg = `⚠️ *Oups ! Il semble que le réseau ${current} rencontre des perturbations techniques nationales en ce moment.*\n\nPour ne pas perdre votre transaction, que souhaitez-vous faire ?`;
+                    
+                    // 🚀 UX FIX: Reassure the buyer that human help is on the way
+                    const circuitBreakerMsg = `⚠️ *Oups ! Il semble que le réseau ${current} rencontre des perturbations techniques en ce moment.*\n\n👨‍💻 *Notre équipe de support a été alertée et va vous contacter sous peu pour vous aider.* En attendant, pour ne pas perdre votre transaction, que souhaitez-vous faire ?`;
                     
                     await supabase.from("transactions").update({ status: "AWAITING_PAYMENT", payment_attempts: attempts }).eq("id", tx.id);
                     await supabase.from("sessions").update({ current_state: "CIRCUIT_BREAKER_MENU" }).eq("phone_number", tx.buyer_phone);
@@ -79,6 +81,15 @@ Deno.serve(async (req: Request) => {
                         { id: "CMD_PAUSE", title: "2️⃣ Attendre" },
                         { id: "CMD_CANCEL", title: "3️⃣ Annuler" }
                     ]);
+
+                    // 🚨 ADMIN ALERT: Trigger God Mode tunnel for instant support
+                    await notifyAdmin(
+                        "HELP_NEEDED", 
+                        `🚨 ÉCHEC DÉPÔT CRITIQUE : L'acheteur (+${tx.buyer_phone}) a échoué 3 fois à payer ${tx.base_amount} ${tx.currency}.\n\nTapez:\nchat ${tx.buyer_phone}\npour l'aider immédiatement.`, 
+                        tx.buyer_phone, 
+                        tx.id
+                    );
+
                 } else {
                     await supabase.from("transactions").update({ status: "AWAITING_PAYMENT", payment_attempts: attempts }).eq("id", tx.id);
                     await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", tx.buyer_phone);

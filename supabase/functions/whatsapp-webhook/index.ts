@@ -25,7 +25,7 @@ Deno.serve(async (req: Request) => {
         for (const entry of body.entry) {
           for (const change of entry.changes) {
             
-            // 🚀 NEW: Catching Meta's Silent Delivery Receipts!
+            // 🚀 Catching Meta's Silent Delivery Receipts!
             if (change.value && change.value.statuses) {
               for (const status of change.value.statuses) {
                 if (status.status === "failed") {
@@ -50,6 +50,11 @@ Deno.serve(async (req: Request) => {
                 if (messageText.toUpperCase() === "ACCEPTER") messageText = "CMD_ACCEPTER";
                 if (messageText.toUpperCase() === "REFUSER") messageText = "CMD_REFUSER";
                 if (messageText.toUpperCase() === "AIDE") messageText = "CMD_AIDE";
+              } else if (message.type === "image") {
+                // 🛡️ COMPLIANCE FIX: Extracting the specific Media ID from Meta!
+                messageText = `[IMAGE_RECEIVED:${message.image.id}]`;
+              } else if (message.type === "document") {
+                messageText = `[IMAGE_RECEIVED:${message.document.id}]`;
               }
 
               if (messageText) {
