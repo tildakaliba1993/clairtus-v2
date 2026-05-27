@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabase";
-import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX, Search, Filter, DollarSign, Activity, AlertOctagon, X, Ban, Clock, Bell, ChevronLeft, ChevronRight, ArrowUpDown } from "lucide-react";
+import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX, Search, Filter, DollarSign, Activity, AlertOctagon, X, Ban, Clock, Bell, ChevronLeft, ChevronRight, ArrowUpDown, Code, SplitSquareHorizontal } from "lucide-react";
 import { toast } from "react-toastify";
 
 export default function AdminPortal() {
@@ -17,17 +17,19 @@ export default function AdminPortal() {
   const [transactions, setTransactions] = useState([]);
   const [userMap, setUserMap] = useState({});
   const [actionLoading, setActionLoading] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false); // 🚀 Added for manual refresh UX
 
   // 🚀 FILTERS & SORTING
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [sortOrder, setSortOrder] = useState("NEWEST"); // NEWEST, OLDEST, HIGHEST
+  const [sortOrder, setSortOrder] = useState("NEWEST"); 
   
   // 🚀 PAGINATION
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
   const [selectedTx, setSelectedTx] = useState(null);
+  const [showRawData, setShowRawData] = useState(false); // 🚀 Added for God View Dev Mode
   const [alerts, setAlerts] = useState([]);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
 
@@ -35,7 +37,7 @@ export default function AdminPortal() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        fetchDashboardData();
+        fetchDashboardData(true);
         fetchAlerts();
       }
       setLoading(false);
@@ -44,10 +46,17 @@ export default function AdminPortal() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        fetchDashboardData();
+        fetchDashboardData(true);
         fetchAlerts();
       }
     });
+
+    // 📡 SILENT AUTO-REFRESH (Every 2 minutes)
+    const interval = setInterval(() => {
+      if (session) {
+        fetchDashboardData(true);
+      }
+    }, 120000);
 
     // 📡 SUPABASE REALTIME SUBSCRIPTION FOR ALERTS
     const channel = supabase
@@ -59,7 +68,6 @@ export default function AdminPortal() {
           const newAlert = payload.new;
           setAlerts(prev => [newAlert, ...prev]);
 
-          // Trigger Toast Notification based on Type
           const toastMsg = `${newAlert.type}: ${newAlert.message}`;
           if (newAlert.type === "SUCCESS_DEPOSIT" || newAlert.type === "SUCCESS_PAYOUT") {
             toast.success(toastMsg, { icon: "💰" });
@@ -71,8 +79,7 @@ export default function AdminPortal() {
             toast(toastMsg);
           }
 
-          // Fetch the latest transactions to ensure the dashboard stays up to date in real time
-          fetchDashboardData();
+          fetchDashboardData(true); // Silent refresh on new alert
         }
       )
       .subscribe();
@@ -80,8 +87,9 @@ export default function AdminPortal() {
     return () => {
       subscription.unsubscribe();
       supabase.removeChannel(channel);
+      clearInterval(interval);
     };
-  }, []);
+  }, [session]);
 
   const fetchAlerts = async () => {
     try {
@@ -106,14 +114,15 @@ export default function AdminPortal() {
     }
   };
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (silent = false) => {
+    if (!silent) setIsRefreshing(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      const { data: { session: activeSession } } = await supabase.auth.getSession();
+      if (!activeSession) return;
 
       const response = await fetch('/api/admin/dashboard', {
         headers: {
-          'Authorization': `Bearer ${session.access_token}`
+          'Authorization': `Bearer ${activeSession.access_token}`
         }
       });
 
@@ -134,8 +143,17 @@ export default function AdminPortal() {
         }, {});
         setUserMap(mappedUsers);
       }
+      
+      // Update selectedTx silently if it's currently open to keep modal live
+      if (selectedTx && txData) {
+        const updatedTx = txData.find(t => t.id === selectedTx.id);
+        if (updatedTx) setSelectedTx(updatedTx);
+      }
+
     } catch (err) {
       console.error("Dashboard fetch error:", err);
+    } finally {
+      if (!silent) setIsRefreshing(false);
     }
   };
 
@@ -162,11 +180,11 @@ export default function AdminPortal() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Action failed");
       
-      alert(`Succès : ${result.message}`);
-      fetchDashboardData(); 
+      toast.success(result.message);
+      fetchDashboardData(true); 
       if (selectedTx && action !== "BAN_USER") setSelectedTx(null);
     } catch (err) {
-      alert(`Erreur : ${err.message}`);
+      toast.error(err.message);
     } finally {
       setActionLoading(null);
     }
@@ -183,7 +201,6 @@ export default function AdminPortal() {
     return { float, revenue, disputes };
   }, [transactions]);
 
-  // 🚀 RESET PAGINATION WHEN FILTERS CHANGE
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter, sortOrder]);
@@ -197,7 +214,6 @@ export default function AdminPortal() {
       return matchesSearch && matchesStatus;
     });
 
-    // Handle Sorting
     filtered.sort((a, b) => {
       if (sortOrder === "NEWEST") {
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -212,7 +228,6 @@ export default function AdminPortal() {
     return filtered;
   }, [transactions, searchTerm, statusFilter, sortOrder]);
 
-  // 🚀 CALCULATE PAGINATION DATA
   const totalPages = Math.ceil(sortedAndFilteredTxs.length / itemsPerPage);
   const currentItems = sortedAndFilteredTxs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
@@ -239,6 +254,16 @@ export default function AdminPortal() {
         </div>
       </div>
     );
+  };
+
+  // 🚀 HELPER FOR GOD VIEW ECONOMICS
+  const calculateEconomics = (tx) => {
+    const gross = Number(tx.base_amount) || 0;
+    const feePct = tx.applied_fee_percentage ?? 2.5;
+    const totalFee = Math.round(gross * (feePct / 100));
+    const secondaryAmount = Number(tx.secondary_vendor_amount) || 0;
+    const primaryNet = gross - totalFee - secondaryAmount;
+    return { gross, feePct, totalFee, secondaryAmount, primaryNet };
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">Chargement...</div>;
@@ -275,7 +300,6 @@ export default function AdminPortal() {
         </div>
         <div className="flex items-center space-x-4">
           
-          {/* NOTIFICATION BELL */}
           <div className="relative">
             <button 
               onClick={() => setIsAlertsOpen(!isAlertsOpen)} 
@@ -289,11 +313,10 @@ export default function AdminPortal() {
               )}
             </button>
 
-            {/* NOTIFICATION DROPDOWN */}
             {isAlertsOpen && (
               <div className="absolute right-0 mt-3 w-80 bg-[#0b141a] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
                 <div className="bg-[#202c33] border-b border-white/10 p-3 flex justify-between items-center">
-                  <h3 className="font-bold text-sm text-white">Centre de Notifications</h3>
+                  <h3 className="font-bold text-sm text-white">Notifications</h3>
                   <button onClick={() => setIsAlertsOpen(false)} className="text-gray-500 hover:text-white"><X className="w-4 h-4" /></button>
                 </div>
                 <div className="max-h-[60vh] overflow-y-auto">
@@ -350,14 +373,11 @@ export default function AdminPortal() {
 
         <div className="flex flex-col lg:flex-row justify-between items-center bg-[#0b141a] border border-white/10 p-4 rounded-xl gap-4">
           <div className="flex flex-col md:flex-row w-full lg:w-3/4 gap-4">
-            
-            {/* Search Bar */}
             <div className="relative w-full md:w-1/3">
               <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-500" />
               <input type="text" placeholder="Rechercher ID ou Téléphone..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-[#202c33] border border-white/5 rounded-lg pl-10 pr-4 py-2 text-white focus:border-emerald-500 outline-none" />
             </div>
             
-            {/* Extended Status Filter */}
             <div className="relative w-full md:w-48">
               <Filter className="absolute left-3 top-2.5 w-5 h-5 text-gray-500" />
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full bg-[#202c33] border border-white/5 rounded-lg pl-10 pr-4 py-2 text-white appearance-none focus:border-emerald-500 outline-none cursor-pointer">
@@ -374,7 +394,6 @@ export default function AdminPortal() {
               </select>
             </div>
 
-            {/* Sorting Dropdown */}
             <div className="relative w-full md:w-48">
               <ArrowUpDown className="absolute left-3 top-2.5 w-5 h-5 text-gray-500" />
               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full bg-[#202c33] border border-white/5 rounded-lg pl-10 pr-4 py-2 text-white appearance-none focus:border-emerald-500 outline-none cursor-pointer">
@@ -386,7 +405,14 @@ export default function AdminPortal() {
 
           </div>
           
-          <button onClick={() => { fetchDashboardData(); }} className="flex items-center w-full lg:w-auto justify-center text-sm bg-[#202c33] hover:bg-[#2a3942] border border-white/5 px-4 py-2 rounded-lg transition-colors"><RefreshCw className="w-4 h-4 mr-2" /> Actualiser</button>
+          <button 
+            onClick={() => fetchDashboardData(false)} 
+            disabled={isRefreshing}
+            className="flex items-center w-full lg:w-auto justify-center text-sm bg-[#202c33] hover:bg-[#2a3942] border border-white/5 px-4 py-2 rounded-lg transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshing ? 'animate-spin text-emerald-500' : ''}`} /> 
+            {isRefreshing ? 'Actualisation...' : 'Actualiser'}
+          </button>
         </div>
 
         <div className="bg-[#0b141a] border border-white/10 rounded-xl overflow-hidden shadow-xl">
@@ -406,7 +432,7 @@ export default function AdminPortal() {
                   <tr><td colSpan={5} className="px-6 py-12 text-center text-gray-500">Aucun résultat trouvé.</td></tr>
                 ) : (
                   currentItems.map((tx) => (
-                    <tr key={tx.id} onClick={() => { setSelectedTx(tx); }} className="hover:bg-[#202c33] transition-colors cursor-pointer group">
+                    <tr key={tx.id} onClick={() => { setSelectedTx(tx); setShowRawData(false); }} className="hover:bg-[#202c33] transition-colors cursor-pointer group">
                       <td className="px-6 py-4 font-mono text-emerald-400 group-hover:underline">{tx.reference}</td>
                       <td className="px-6 py-4">{renderUserCell(tx.seller_phone)}</td>
                       <td className="px-6 py-4">{renderUserCell(tx.buyer_phone)}</td>
@@ -456,12 +482,13 @@ export default function AdminPortal() {
         </div>
       </main>
 
-      {/* ENHANCED AUDIT TRAIL MODAL */}
+      {/* 🚀 GOD VIEW MODAL */}
       {selectedTx && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0b141a] border border-white/10 rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            {/* Header */}
-            <div className="flex justify-between items-center border-b border-white/5 p-6 sticky top-0 bg-[#0b141a]/95 backdrop-blur z-10">
+          <div className="bg-[#0b141a] border border-white/10 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="flex justify-between items-center border-b border-white/5 p-6 sticky top-0 bg-[#0b141a]/95 backdrop-blur z-20">
               <div className="flex items-center gap-4">
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   Dossier: <span className="font-mono text-emerald-500">{selectedTx.reference}</span>
@@ -474,52 +501,199 @@ export default function AdminPortal() {
                   {selectedTx.status}
                 </span>
               </div>
-              <button onClick={() => { setSelectedTx(null); }} className="text-gray-400 hover:text-white"><X className="w-6 h-6" /></button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowRawData(!showRawData)} className={`p-2 rounded-lg border transition-colors ${showRawData ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/50' : 'bg-[#202c33] text-gray-400 border-white/5 hover:text-white hover:bg-[#2a3942]'}`} title="Mode Développeur">
+                  <Code className="w-5 h-5" />
+                </button>
+                <button onClick={() => { setSelectedTx(null); setShowRawData(false); }} className="p-2 text-gray-400 hover:text-white bg-[#202c33] hover:bg-[#2a3942] rounded-lg transition-colors border border-white/5"><X className="w-5 h-5" /></button>
+              </div>
             </div>
             
-            <div className="p-6 space-y-8">
-              {/* Acteurs */}
+            <div className="p-6 space-y-8 overflow-y-auto">
+              
+              {/* RAW DATA TOGGLE (DEV MODE) */}
+              {showRawData && (
+                <div className="bg-[#202c33] rounded-lg border border-emerald-500/30 p-4">
+                  <h3 className="text-xs font-bold text-emerald-500 uppercase tracking-wider mb-2">Données Brutes (JSON)</h3>
+                  <pre className="text-[10px] text-emerald-300/80 font-mono overflow-x-auto whitespace-pre-wrap">
+                    {JSON.stringify(selectedTx, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              {/* 1. ACTEURS DE LA TRANSACTION */}
               <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Acteurs de la transaction</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
-                    <p className="text-xs text-gray-400 mb-1">Vendeur (Bénéficiaire)</p>
-                    <p className="font-mono text-white text-lg">{selectedTx.seller_phone || "Non défini"}</p>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">1. Profils Utilisateurs</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5 flex flex-col justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1">Vendeur Principal (Bénéficiaire)</p>
+                      <p className="font-mono text-white text-lg">{selectedTx.seller_phone || "Non défini"}</p>
+                    </div>
+                    {userMap[selectedTx.seller_phone] && (
+                      <div className="mt-3 pt-3 border-t border-white/5 flex justify-between items-center text-xs">
+                        <span className="text-gray-400">{userMap[selectedTx.seller_phone].kyc_level}</span>
+                        <span className="font-bold text-emerald-400">Score: {userMap[selectedTx.seller_phone].trust_score}</span>
+                      </div>
+                    )}
                   </div>
-                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
-                    <p className="text-xs text-gray-400 mb-1">Acheteur (Payeur)</p>
-                    <p className="font-mono text-white text-lg">{selectedTx.buyer_phone || "Non défini"}</p>
+                  
+                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5 flex flex-col justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400 mb-1">Acheteur (Payeur)</p>
+                      <p className="font-mono text-white text-lg">{selectedTx.buyer_phone || "Non défini"}</p>
+                    </div>
+                    {userMap[selectedTx.buyer_phone] && (
+                      <div className="mt-3 pt-3 border-t border-white/5 flex justify-between items-center text-xs">
+                        <span className="text-gray-400">{userMap[selectedTx.buyer_phone].kyc_level}</span>
+                        <span className="font-bold text-emerald-400">Score: {userMap[selectedTx.buyer_phone].trust_score}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedTx.secondary_vendor_phone && (
+                    <div className="bg-[#202c33] p-4 rounded-lg border border-blue-500/20 bg-gradient-to-br from-[#202c33] to-blue-900/10 flex flex-col justify-between">
+                      <div>
+                        <div className="flex justify-between items-start">
+                          <p className="text-xs text-blue-400 mb-1 font-semibold">Vendeur Secondaire (Split)</p>
+                          <SplitSquareHorizontal className="w-4 h-4 text-blue-500" />
+                        </div>
+                        <p className="font-mono text-white text-lg">{selectedTx.secondary_vendor_phone}</p>
+                      </div>
+                      {userMap[selectedTx.secondary_vendor_phone] && (
+                         <div className="mt-3 pt-3 border-t border-white/5 flex justify-between items-center text-xs">
+                          <span className="text-gray-400">{userMap[selectedTx.secondary_vendor_phone].kyc_level}</span>
+                          <span className="font-bold text-emerald-400">Score: {userMap[selectedTx.secondary_vendor_phone].trust_score}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 2. ECONOMICS & FINANCIALS */}
+              {(() => {
+                const eco = calculateEconomics(selectedTx);
+                return (
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">2. Structure Financière</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                      <div className="bg-[#202c33] p-4 rounded-lg border border-white/5 col-span-2">
+                        <p className="text-gray-400 mb-1 text-xs">Description du bien / Service</p>
+                        <p className="text-white font-medium">&quot;{selectedTx.item_description}&quot;</p>
+                      </div>
+                      <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
+                        <p className="text-gray-400 mb-1 text-xs">Devise</p>
+                        <p className="font-bold text-white text-lg">{selectedTx.currency || "N/A"}</p>
+                      </div>
+                      <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
+                        <p className="text-gray-400 mb-1 text-xs">Code PIN Sécurité</p>
+                        <div className="flex items-center justify-between">
+                          <p className="font-mono font-bold text-white text-lg tracking-widest">{selectedTx.pin_code || "****"}</p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${(selectedTx.pin_attempts || 0) >= 3 ? 'bg-red-500/20 text-red-400' : 'bg-white/10 text-gray-400'}`}>Essais: {selectedTx.pin_attempts || 0}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Breakdown Visualizer */}
+                    <div className="bg-[#202c33] rounded-lg border border-white/5 overflow-hidden">
+                      <div className="p-4 bg-white/5 flex justify-between items-center border-b border-white/5">
+                        <span className="text-sm font-semibold text-white">Montant Brut (Payé par l'Acheteur)</span>
+                        <span className="text-lg font-bold text-white">{eco.gross} {selectedTx.currency}</span>
+                      </div>
+                      <div className="p-4 grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/5">
+                        <div className="p-4 flex flex-col justify-center">
+                          <span className="text-xs text-emerald-400 mb-1">Revenus Clairtus ({eco.feePct}%)</span>
+                          <span className="text-xl font-mono text-emerald-500">+{eco.totalFee} {selectedTx.currency}</span>
+                        </div>
+                        {selectedTx.secondary_vendor_phone ? (
+                           <>
+                             <div className="p-4 flex flex-col justify-center">
+                              <span className="text-xs text-blue-400 mb-1">Split (Vendeur Secondaire)</span>
+                              <span className="text-xl font-mono text-blue-400">{eco.secondaryAmount} {selectedTx.currency}</span>
+                             </div>
+                             <div className="p-4 flex flex-col justify-center bg-white/5">
+                              <span className="text-xs text-gray-400 mb-1">Net (Vendeur Principal)</span>
+                              <span className="text-xl font-mono font-bold text-white">{eco.primaryNet} {selectedTx.currency}</span>
+                             </div>
+                           </>
+                        ) : (
+                          <div className="p-4 flex flex-col justify-center col-span-2 bg-white/5">
+                            <span className="text-xs text-gray-400 mb-1">Montant Net (Versé au Vendeur)</span>
+                            <span className="text-xl font-mono font-bold text-white">{eco.primaryNet} {selectedTx.currency}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* 3. TECHNICAL GATEWAYS (PAWAPAY) */}
+              <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">3. Passerelles Techniques & API (PawaPay)</h3>
+                <div className="bg-[#202c33] rounded-lg border border-white/5 overflow-hidden text-sm">
+                  <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-white/5">
+                    
+                    {/* Inbound */}
+                    <div className="p-5">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                        <h4 className="font-semibold text-white">Flux Entrant (Deposit)</h4>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                          <span className="text-gray-500 text-xs">Tentatives de Paiement</span>
+                          <span className={`font-mono text-xs ${(selectedTx.payment_attempts || 0) >= 3 ? 'text-red-400' : 'text-gray-300'}`}>{selectedTx.payment_attempts || 0} / 3</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 text-xs block mb-1">Deposit ID</span>
+                          <span className="font-mono text-xs text-gray-300 break-all">{selectedTx.pawapay_deposit_id || "En attente"}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Outbound */}
+                    <div className="p-5">
+                      <div className="flex items-center gap-2 mb-4">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                        <h4 className="font-semibold text-white">Flux Sortant (Payout / Refund)</h4>
+                      </div>
+                      <div className="space-y-4">
+                         {selectedTx.pawapay_refund_id && (
+                           <div>
+                            <span className="text-gray-500 text-xs block mb-1 flex justify-between">Refund ID <span className="text-amber-500">Remboursé</span></span>
+                            <span className="font-mono text-xs text-gray-300 break-all">{selectedTx.pawapay_refund_id}</span>
+                           </div>
+                         )}
+                         {selectedTx.pawapay_payout_id && (
+                           <div>
+                            <span className="text-gray-500 text-xs block mb-1 flex justify-between">Primary Payout ID <span className={selectedTx.primary_payout_status === 'FAILED' ? 'text-red-500' : 'text-emerald-500'}>{selectedTx.primary_payout_status || 'PROCESSED'}</span></span>
+                            <span className="font-mono text-xs text-gray-300 break-all">{selectedTx.pawapay_payout_id}</span>
+                           </div>
+                         )}
+                         {selectedTx.secondary_payout_id && (
+                           <div className="pt-2 border-t border-white/5">
+                            <span className="text-gray-500 text-xs block mb-1 flex justify-between">Secondary Payout ID <span className={selectedTx.secondary_payout_status === 'FAILED' ? 'text-red-500' : 'text-emerald-500'}>{selectedTx.secondary_payout_status || 'PROCESSED'}</span></span>
+                            <span className="font-mono text-xs text-gray-300 break-all">{selectedTx.secondary_payout_id}</span>
+                           </div>
+                         )}
+                         {!selectedTx.pawapay_refund_id && !selectedTx.pawapay_payout_id && (
+                           <p className="text-xs text-gray-500 italic">Aucun flux sortant initié.</p>
+                         )}
+                      </div>
+                    </div>
+
                   </div>
                 </div>
               </div>
 
-              {/* Financials */}
+              {/* 4. AUDIT TRAIL TIMELINE */}
               <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Détails Financiers & Techniques</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
-                    <p className="text-gray-400 mb-1 text-xs">Montant</p>
-                    <p className="font-bold text-white text-lg">{selectedTx.base_amount} {selectedTx.currency}</p>
-                  </div>
-                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5">
-                    <p className="text-gray-400 mb-1 text-xs">Tentatives PIN</p>
-                    <p className={`font-bold text-lg ${(selectedTx.pin_attempts || 0) >= 3 ? 'text-red-500' : 'text-white'}`}>{selectedTx.pin_attempts || 0} / 3</p>
-                  </div>
-                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5 col-span-2">
-                    <p className="text-gray-400 mb-1 text-xs">Description du bien</p>
-                    <p className="text-white italic">&quot;{selectedTx.item_description}&quot;</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Audit Trail Timeline */}
-              <div>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Piste d&apos;Audit (Audit Trail)</h3>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">4. Historique d'Événements</h3>
                 <div className="bg-[#202c33] border border-white/5 rounded-lg p-5 space-y-6 relative">
-                  {/* Vertical Line */}
                   <div className="absolute left-[31px] top-8 bottom-8 w-px bg-white/10"></div>
 
-                  {/* Event 1 */}
                   {selectedTx.created_at && (
                     <div className="flex items-start gap-4 relative z-10">
                       <div className="w-6 h-6 rounded-full bg-blue-500/20 border border-blue-500 flex items-center justify-center shrink-0 mt-0.5">
@@ -532,21 +706,6 @@ export default function AdminPortal() {
                     </div>
                   )}
 
-                  {/* Event 2: PawaPay */}
-                  {(selectedTx.pawapay_payout_id || selectedTx.pawapay_refund_id) && (
-                    <div className="flex items-start gap-4 relative z-10">
-                      <div className="w-6 h-6 rounded-full bg-purple-500/20 border border-purple-500 flex items-center justify-center shrink-0 mt-0.5">
-                        <Activity className="w-3 h-3 text-purple-400" />
-                      </div>
-                      <div>
-                        <p className="text-white font-medium">Passerelle PawaPay (API)</p>
-                        {selectedTx.pawapay_payout_id && <p className="text-xs text-gray-400 font-mono mt-1">Payout ID: {selectedTx.pawapay_payout_id}</p>}
-                        {selectedTx.pawapay_refund_id && <p className="text-xs text-gray-400 font-mono mt-1">Refund ID: {selectedTx.pawapay_refund_id}</p>}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Event 3: Admin Notes */}
                   {selectedTx.admin_note && (
                     <div className="flex items-start gap-4 relative z-10">
                       <div className="w-6 h-6 rounded-full bg-amber-500/20 border border-amber-500 flex items-center justify-center shrink-0 mt-0.5">
@@ -561,7 +720,6 @@ export default function AdminPortal() {
                     </div>
                   )}
 
-                  {/* Event 4: Current Status */}
                   <div className="flex items-start gap-4 relative z-10">
                     <div className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 mt-0.5
                       ${selectedTx.status === 'COMPLETED' ? 'bg-emerald-500/20 border-emerald-500' : 
@@ -572,14 +730,14 @@ export default function AdminPortal() {
                           selectedTx.status === 'DISPUTED' ? 'text-red-400' : 'text-gray-400'}`} />
                     </div>
                     <div>
-                      <p className="text-white font-medium">Statut Actuel</p>
-                      <p className="text-xs text-gray-500">{selectedTx.status}</p>
+                      <p className="text-white font-medium">Dernière mise à jour ({selectedTx.status})</p>
+                      <p className="text-xs text-gray-500">{selectedTx.updated_at ? new Date(selectedTx.updated_at).toLocaleString('fr-FR') : "N/A"}</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Actions Footer */}
+              {/* 5. ACTIONS FOOTER */}
               <div className="flex flex-col md:flex-row gap-6 border-t border-white/10 pt-6">
                 <div className="flex-1 space-y-3">
                   <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sécurité Utilisateurs</h3>
@@ -607,7 +765,7 @@ export default function AdminPortal() {
 
                 {(selectedTx.status === "FUNDED" || selectedTx.status === "DISPUTED") && (
                   <div className="flex-1 space-y-3 border-t md:border-t-0 md:border-l border-white/10 md:pl-6 pt-4 md:pt-0">
-                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Arbitrage Financier</h3>
+                    <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Arbitrage Financier Force</h3>
                     <div className="flex gap-2">
                       <button 
                         onClick={() => {
