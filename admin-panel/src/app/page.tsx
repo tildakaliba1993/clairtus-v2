@@ -17,7 +17,7 @@ export default function AdminPortal() {
   const [transactions, setTransactions] = useState([]);
   const [userMap, setUserMap] = useState({});
   const [actionLoading, setActionLoading] = useState(null);
-  const [isRefreshing, setIsRefreshing] = useState(false); // 🚀 Added for manual refresh UX
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // 🚀 FILTERS & SORTING
   const [searchTerm, setSearchTerm] = useState("");
@@ -28,10 +28,16 @@ export default function AdminPortal() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  const [selectedTx, setSelectedTx] = useState(null);
-  const [showRawData, setShowRawData] = useState(false); // 🚀 Added for God View Dev Mode
+  // 🚀 UX FIX: Store ID instead of object to prevent React Stale State glitches
+  const [selectedTxId, setSelectedTxId] = useState(null);
+  const [showRawData, setShowRawData] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
+
+  // 🚀 Dynamically derive the selected transaction
+  const selectedTx = useMemo(() => {
+    return transactions.find(t => t.id === selectedTxId) || null;
+  }, [transactions, selectedTxId]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -51,14 +57,14 @@ export default function AdminPortal() {
       }
     });
 
-    // 📡 SILENT AUTO-REFRESH (Every 2 minutes)
+    // 📡 SILENT AUTO-REFRESH
     const interval = setInterval(() => {
       if (session) {
         fetchDashboardData(true);
       }
     }, 120000);
 
-    // 📡 SUPABASE REALTIME SUBSCRIPTION FOR ALERTS
+    // 📡 SUPABASE REALTIME SUBSCRIPTION
     const channel = supabase
       .channel('admin-alerts-channel')
       .on(
@@ -79,7 +85,7 @@ export default function AdminPortal() {
             toast(toastMsg);
           }
 
-          fetchDashboardData(true); // Silent refresh on new alert
+          fetchDashboardData(true);
         }
       )
       .subscribe();
@@ -120,15 +126,17 @@ export default function AdminPortal() {
       const { data: { session: activeSession } } = await supabase.auth.getSession();
       if (!activeSession) return;
 
-      const response = await fetch('/api/admin/dashboard', {
+      // 🚀 UX FIX: Busted Next.js cache so the Actualiser button actually works
+      const response = await fetch(`/api/admin/dashboard?t=${Date.now()}`, {
+        method: 'GET',
         headers: {
-          'Authorization': `Bearer ${activeSession.access_token}`
-        }
+          'Authorization': `Bearer ${activeSession.access_token}`,
+          'Cache-Control': 'no-cache'
+        },
+        cache: 'no-store' 
       });
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch dashboard data: ${response.statusText}`);
-      }
+      if (!response.ok) throw new Error(`Failed to fetch dashboard data`);
 
       const { transactions: txData, users: usersData } = await response.json();
 
@@ -136,20 +144,11 @@ export default function AdminPortal() {
       
       if (usersData) {
         const mappedUsers = usersData.reduce((acc: any, user: any) => {
-          if (user.phone_number) {
-            acc[user.phone_number] = user;
-          }
+          if (user.phone_number) acc[user.phone_number] = user;
           return acc;
         }, {});
         setUserMap(mappedUsers);
       }
-      
-      // Update selectedTx silently if it's currently open to keep modal live
-      if (selectedTx && txData) {
-        const updatedTx = txData.find(t => t.id === selectedTx.id);
-        if (updatedTx) setSelectedTx(updatedTx);
-      }
-
     } catch (err) {
       console.error("Dashboard fetch error:", err);
     } finally {
@@ -182,7 +181,8 @@ export default function AdminPortal() {
       
       toast.success(result.message);
       fetchDashboardData(true); 
-      if (selectedTx && action !== "BAN_USER") setSelectedTx(null);
+      // Close modal on action complete (unless just banning a user)
+      if (selectedTxId && action !== "BAN_USER") setSelectedTxId(null);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -256,7 +256,6 @@ export default function AdminPortal() {
     );
   };
 
-  // 🚀 HELPER FOR GOD VIEW ECONOMICS
   const calculateEconomics = (tx) => {
     const gross = Number(tx.base_amount) || 0;
     const feePct = tx.applied_fee_percentage ?? 2.5;
@@ -432,7 +431,11 @@ export default function AdminPortal() {
                   <tr><td colSpan={5} className="px-6 py-12 text-center text-gray-500">Aucun résultat trouvé.</td></tr>
                 ) : (
                   currentItems.map((tx) => (
-                    <tr key={tx.id} onClick={() => { setSelectedTx(tx); setShowRawData(false); }} className="hover:bg-[#202c33] transition-colors cursor-pointer group">
+                    <tr 
+                      key={tx.id} 
+                      onClick={() => { setSelectedTxId(tx.id); setShowRawData(false); }} 
+                      className="hover:bg-[#202c33] transition-colors cursor-pointer group"
+                    >
                       <td className="px-6 py-4 font-mono text-emerald-400 group-hover:underline">{tx.reference}</td>
                       <td className="px-6 py-4">{renderUserCell(tx.seller_phone)}</td>
                       <td className="px-6 py-4">{renderUserCell(tx.buyer_phone)}</td>
@@ -505,7 +508,7 @@ export default function AdminPortal() {
                 <button onClick={() => setShowRawData(!showRawData)} className={`p-2 rounded-lg border transition-colors ${showRawData ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/50' : 'bg-[#202c33] text-gray-400 border-white/5 hover:text-white hover:bg-[#2a3942]'}`} title="Mode Développeur">
                   <Code className="w-5 h-5" />
                 </button>
-                <button onClick={() => { setSelectedTx(null); setShowRawData(false); }} className="p-2 text-gray-400 hover:text-white bg-[#202c33] hover:bg-[#2a3942] rounded-lg transition-colors border border-white/5"><X className="w-5 h-5" /></button>
+                <button onClick={() => { setSelectedTxId(null); setShowRawData(false); }} className="p-2 text-gray-400 hover:text-white bg-[#202c33] hover:bg-[#2a3942] rounded-lg transition-colors border border-white/5"><X className="w-5 h-5" /></button>
               </div>
             </div>
             
