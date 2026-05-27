@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 import { Lock, ShieldAlert, CheckCircle, XCircle, AlertTriangle, RefreshCw, LogOut, ShieldCheck, UserX, Search, Filter, DollarSign, Activity, AlertOctagon, X, Ban, Clock, Bell, ChevronLeft, ChevronRight, ArrowUpDown, Code, SplitSquareHorizontal } from "lucide-react";
@@ -28,17 +28,18 @@ export default function AdminPortal() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // 🚀 UX FIX: Store ID instead of object to prevent React Stale State glitches
   const [selectedTxId, setSelectedTxId] = useState(null);
   const [showRawData, setShowRawData] = useState(false);
   const [alerts, setAlerts] = useState([]);
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
 
-  // 🚀 Dynamically derive the selected transaction
   const selectedTx = useMemo(() => {
     return transactions.find(t => t.id === selectedTxId) || null;
   }, [transactions, selectedTxId]);
 
+  // ==========================================
+  // ENGINE 1: AUTH & INITIAL LOAD (Runs Once)
+  // ==========================================
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -49,22 +50,36 @@ export default function AdminPortal() {
       setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, activeSession) => {
+      setSession(activeSession);
+      if (activeSession) {
         fetchDashboardData(true);
         fetchAlerts();
       }
     });
 
-    // 📡 SILENT AUTO-REFRESH
-    const interval = setInterval(() => {
-      if (session) {
-        fetchDashboardData(true);
-      }
-    }, 120000);
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []); // 👈 Empty array ensures this only mounts once!
 
-    // 📡 SUPABASE REALTIME SUBSCRIPTION
+  // ==========================================
+  // ENGINE 2: SILENT AUTO-REFRESH (Depends on Session)
+  // ==========================================
+  useEffect(() => {
+    if (!session) return;
+    
+    const interval = setInterval(() => {
+      fetchDashboardData(true);
+    }, 120000); // 2 minutes
+
+    return () => clearInterval(interval);
+  }, [session]);
+
+  // ==========================================
+  // ENGINE 3: REALTIME ALERTS (Runs Once)
+  // ==========================================
+  useEffect(() => {
     const channel = supabase
       .channel('admin-alerts-channel')
       .on(
@@ -91,12 +106,13 @@ export default function AdminPortal() {
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
       supabase.removeChannel(channel);
-      clearInterval(interval);
     };
-  }, [session]);
+  }, []);
 
+  // ==========================================
+  // DATA FETCHING & ACTIONS
+  // ==========================================
   const fetchAlerts = async () => {
     try {
       const { data, error } = await supabase
@@ -113,8 +129,9 @@ export default function AdminPortal() {
 
   const markAlertAsRead = async (alertId) => {
     try {
-      await supabase.from('admin_alerts').update({ is_read: true }).eq('id', alertId);
+      // Optimistic UI update instantly
       setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, is_read: true } : a));
+      await supabase.from('admin_alerts').update({ is_read: true }).eq('id', alertId);
     } catch (err) {
       console.error(err);
     }
@@ -126,14 +143,15 @@ export default function AdminPortal() {
       const { data: { session: activeSession } } = await supabase.auth.getSession();
       if (!activeSession) return;
 
-      // 🚀 UX FIX: Busted Next.js cache so the Actualiser button actually works
+      // 🚀 Extreme Cache Busting for reliable manual refreshes
       const response = await fetch(`/api/admin/dashboard?t=${Date.now()}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${activeSession.access_token}`,
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         },
-        cache: 'no-store' 
       });
 
       if (!response.ok) throw new Error(`Failed to fetch dashboard data`);
@@ -165,6 +183,13 @@ export default function AdminPortal() {
     setLoading(false);
   };
 
+  // 🚀 Hard reset logout
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    window.location.reload(); 
+  };
+
   const handleAdminAction = async (txId, action, targetPhone = "") => {
     if (!window.confirm(`Confirmer l'action : ${action} ?`)) return;
     
@@ -181,7 +206,6 @@ export default function AdminPortal() {
       
       toast.success(result.message);
       fetchDashboardData(true); 
-      // Close modal on action complete (unless just banning a user)
       if (selectedTxId && action !== "BAN_USER") setSelectedTxId(null);
     } catch (err) {
       toast.error(err.message);
@@ -265,7 +289,7 @@ export default function AdminPortal() {
     return { gross, feePct, totalFee, secondaryAmount, primaryNet };
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">Chargement...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#020617] text-white">Chargement...</div>;
 
   if (!session) {
     return (
@@ -350,7 +374,10 @@ export default function AdminPortal() {
             )}
           </div>
 
-          <button onClick={() => { supabase.auth.signOut(); }} className="flex items-center text-sm bg-[#202c33] hover:bg-[#2a3942] border border-white/5 px-4 py-2 rounded-lg transition-colors"><LogOut className="w-4 h-4 mr-2" /> Déconnexion</button>
+          {/* 🚀 FIXED LOGOUT BUTTON */}
+          <button onClick={handleLogout} className="flex items-center text-sm bg-[#202c33] hover:bg-[#2a3942] border border-white/5 px-4 py-2 rounded-lg transition-colors">
+            <LogOut className="w-4 h-4 mr-2" /> Déconnexion
+          </button>
         </div>
       </header>
 
