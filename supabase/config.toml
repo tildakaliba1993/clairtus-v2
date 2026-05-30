@@ -1,7 +1,9 @@
 
 [functions.pawapay-webhook]
 enabled = true
-verify_jwt = true
+# Called by PawaPay (external). It cannot send a Supabase JWT, so JWT verification
+# must be off — the function verifies the payment payload itself.
+verify_jwt = false
 import_map = "./functions/pawapay-webhook/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -12,7 +14,10 @@ entrypoint = "./functions/pawapay-webhook/index.ts"
 
 [functions.whatsapp-webhook]
 enabled = true
-verify_jwt = true
+# Called by Meta WhatsApp servers (external). They cannot send a Supabase JWT.
+# MUST be false or every inbound message is rejected at the gateway (zero logs).
+# Security is enforced via META_VERIFY_TOKEN on the GET handshake.
+verify_jwt = false
 import_map = "./functions/whatsapp-webhook/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -23,7 +28,8 @@ entrypoint = "./functions/whatsapp-webhook/index.ts"
 
 [functions.admin-console]
 enabled = true
-verify_jwt = true
+# Authenticates via its own adminSecret in the request body, not a Supabase JWT.
+verify_jwt = false
 import_map = "./functions/admin-console/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -34,7 +40,9 @@ entrypoint = "./functions/admin-console/index.ts"
 
 [functions.transaction-sweeper]
 enabled = true
-verify_jwt = true
+# Invoked by the internal cron. Setting false is strictly more permissive and
+# cannot break a working cron; it guarantees the sweeper is reachable.
+verify_jwt = false
 import_map = "./functions/transaction-sweeper/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -45,7 +53,9 @@ entrypoint = "./functions/transaction-sweeper/index.ts"
 
 [functions.queue-worker]
 enabled = true
-verify_jwt = true
+# Triggered by the trigger-queue-worker database webhook, which does not attach a
+# Supabase JWT. MUST be false or queued payments are never processed.
+verify_jwt = false
 import_map = "./functions/queue-worker/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -56,7 +66,9 @@ entrypoint = "./functions/queue-worker/index.ts"
 
 [functions.admin-actions]
 enabled = true
-verify_jwt = true
+# Called by the admin panel's /api/admin/action proxy with Bearer ADMIN_SECRET
+# (a custom secret, not a Supabase JWT). MUST be false or admin actions 401 at the gateway.
+verify_jwt = false
 import_map = "./functions/admin-actions/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -74,7 +86,9 @@ entrypoint = "./functions/simulate-alerts/index.ts"
 
 [functions.kyc-webhook]
 enabled = true
-verify_jwt = true
+# Triggered by the notify_user_on_kyc database webhook (users table UPDATE), which
+# does not attach a Supabase JWT. MUST be false or KYC notifications silently fail.
+verify_jwt = false
 import_map = "./functions/kyc-webhook/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
