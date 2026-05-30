@@ -1,11 +1,34 @@
 // supabase/functions/_shared/stateMachine.ts
-import { sendWhatsAppText, sendWhatsAppButtons, sendWhatsAppTemplate, sendWhatsAppImage, processAndStoreKYC } from "./whatsappClient.ts";
+import { sendWhatsAppText, sendWhatsAppButtons, sendWhatsAppTemplate, sendWhatsAppImage } from "./whatsappClient.ts";
 import { getSupabaseClient } from "./supabaseClient.ts";
 import { MESSAGES } from "./whatsappMessaging.ts";
-import { initiatePawaPayPayout, initiatePawaPayDeposit } from "./pawapayClient.ts"; 
+import { initiatePawaPayPayout, initiatePawaPayDeposit } from "./pawapayClient.ts";
 import { notifyAdmin } from "./adminAlerts.ts";
 
 const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 1.5% de frais d'escrow, répartis selon l'accord entre les parties.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n\n🔗 *Conditions & Confidentialité :* https://clairtus.com\n\nEn continuant, vous acceptez ces conditions.";
+
+// Builds the personalized Smile ID verification URL for a user.
+function buildKYCLink(phone: string): string {
+    const base = Deno.env.get("KYC_BASE_URL") ?? "https://clairtus.com";
+    return `${base}/kyc?phone=${encodeURIComponent(phone)}`;
+}
+
+// Sends the Smile ID verification link to a user via WhatsApp and parks them in AWAITING_KYC_COMPLETION.
+// All KYC triggers in the state machine call this helper instead of showing a photo prompt.
+async function sendKYCVerificationLink(phone: string, supabase: any, reason: string): Promise<void> {
+    const link = buildKYCLink(phone);
+    await supabase.from("sessions").update({ current_state: "AWAITING_KYC_COMPLETION" }).eq("phone_number", phone);
+    await supabase.from("users").update({ kyc_status: "PENDING" }).eq("phone_number", phone);
+
+    const msg = `🔐 *Vérification d'Identité Requise*\n\n` +
+        `${reason}\n\n` +
+        `👉 *Cliquez sur ce lien pour vérifier votre identité (2 min) :*\n${link}\n\n` +
+        `📄 Documents acceptés : *Carte d'Électeur Nationale* ou *Passeport*\n` +
+        `📱 Une caméra frontale et un bon éclairage sont nécessaires.\n\n` +
+        `✅ Vous recevrez une notification WhatsApp dès que votre identité sera confirmée.`;
+
+    await sendWhatsAppText(phone, msg);
+}
 
 // Computes the actual deposit amount the buyer pays based on who covers the escrow fee.
 export function getDepositAmount(base: number, feePct: number, feeResp?: string | null): number {
@@ -562,8 +585,7 @@ export async function processMessage(phone: string, text: string) {
                 // 🛡️ COMPLIANCE: HARD FINANCIAL CAP INTERCEPTOR
                 const limitAmount = currentTx.currency === "USD" ? 500 : 1415000;
                 if (priceSell > limitAmount && user.kyc_status !== "VERIFIED") {
-                    await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
-                    return await sendWhatsAppText(phone, `🚨 *Limite de Sécurité*\n\nVotre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction.\n\nPour débloquer les transactions illimitées, veuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.`);
+                    return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction non vérifiée.`);
                 }
 
                 await supabase.from("transactions").update({ base_amount: priceSell }).eq("id", session.draft_transaction_id);
@@ -638,8 +660,7 @@ export async function processMessage(phone: string, text: string) {
                 // 🛡️ COMPLIANCE: HARD FINANCIAL CAP INTERCEPTOR
                 const limitAmount = currentTx.currency === "USD" ? 500 : 1415000;
                 if (priceBuy > limitAmount && user.kyc_status !== "VERIFIED") {
-                    await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
-                    return await sendWhatsAppText(phone, `🚨 *Limite de Sécurité*\n\nVotre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction.\n\nPour débloquer les transactions illimitées, veuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.`);
+                    return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction non vérifiée.`);
                 }
 
                 await supabase.from("transactions").update({ base_amount: priceBuy }).eq("id", session.draft_transaction_id);
@@ -686,8 +707,7 @@ export async function processMessage(phone: string, text: string) {
                     .gte("created_at", twentyFourHoursAgo);
 
                 if (pingPongCount !== null && pingPongCount >= 2 && user.kyc_status !== "VERIFIED") {
-                    await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
-                    return await sendWhatsAppText(phone, "🚨 *Contrôle de Sécurité*\n\nVous avez atteint la limite de transactions répétées avec ce numéro. Pour continuer, veuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.");
+                    return await sendKYCVerificationLink(phone, supabase, "Vous avez atteint la limite de transactions répétées avec ce numéro. Une vérification d'identité est requise pour continuer.");
                 }
 
                 const { data: txSell } = await supabase.from("transactions").update({ buyer_phone: counterpartyPhone, status: "INITIATED" }).eq("id", session.draft_transaction_id).select().single();
@@ -731,8 +751,7 @@ export async function processMessage(phone: string, text: string) {
                     .gte("created_at", twentyFourHoursAgo);
 
                 if (pingPongCount !== null && pingPongCount >= 2 && user.kyc_status !== "VERIFIED") {
-                    await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
-                    return await sendWhatsAppText(phone, "🚨 *Contrôle de Sécurité*\n\nVous avez atteint la limite de transactions répétées avec ce vendeur. Pour continuer, veuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.");
+                    return await sendKYCVerificationLink(phone, supabase, "Vous avez atteint la limite de transactions répétées avec ce vendeur. Une vérification d'identité est requise pour continuer.");
                 }
 
                 const { data: txBuy } = await supabase.from("transactions").update({ seller_phone: counterpartyPhoneBuy, status: "INITIATED" }).eq("id", session.draft_transaction_id).select().single();
@@ -754,34 +773,29 @@ export async function processMessage(phone: string, text: string) {
                 break;
             }
 
-            // 🛡️ COMPLIANCE 3: PROGRESSIVE KYC STATE
-            case "AWAITING_ID_DOCUMENT":
-                if (cleanText.startsWith("[IMAGE_RECEIVED:")) {
-                    const mediaId = cleanText.split(":")[1].replace("]", "");
-                    
-                    await sendWhatsAppText(phone, "⏳ Téléchargement et sécurisation de votre document en cours...");
+            // 🛡️ KYC PENDING — user has been sent the Smile ID link and is waiting for verification.
+            // Any message (including old photo submissions) re-sends the link.
+            case "AWAITING_KYC_COMPLETION": {
+                const { data: kycUser } = await supabase.from("users").select("kyc_status").eq("phone_number", phone).single();
 
-                    try {
-                        // Download from Meta & Upload to Supabase Storage
-                        const kycUrl = await processAndStoreKYC(mediaId, phone, supabase);
-
-                        // Save the URL permanently in the user's database row
-                        await supabase.from("users").update({ kyc_status: "PENDING", kyc_doc_url: kycUrl }).eq("phone_number", phone);
-                        await supabase.from("sessions").update({ current_state: "MAIN_MENU" }).eq("phone_number", phone);
-                        
-                        await sendWhatsAppText(phone, "✅ Document reçu et sauvegardé avec succès. Notre équipe va le vérifier sous peu. Vous recevrez une notification dès que votre compte sera débloqué.");
-                        
-                        // Send the Admin an alert WITH the clickable link!
-                        await sendWhatsAppText("27603960790", `🚨 *NOUVEAU KYC À VÉRIFIER*\n\nDe : +${phone}\n\nCliquez sur ce lien pour voir la pièce d'identité :\n${kycUrl}\n\nAllez sur Supabase pour changer son kyc_status en VERIFIED.`);
-                        
-                    } catch (error) {
-                        console.error("KYC Process Error:", error);
-                        await sendWhatsAppText(phone, "❌ Une erreur technique est survenue lors de l'enregistrement. Veuillez renvoyer la photo de votre pièce d'identité.");
-                    }
+                if (kycUser?.kyc_status === "VERIFIED") {
+                    // Verification completed since the last check — move them along.
+                    await supabase.from("sessions").update({ current_state: "MAIN_MENU" }).eq("phone_number", phone);
+                    await sendWhatsAppText(phone, `✅ *Identité vérifiée !*\n\nVotre compte est maintenant débloqué. Tapez *BONJOUR* pour reprendre votre transaction.`);
+                } else if (kycUser?.kyc_status === "REJECTED") {
+                    const link = buildKYCLink(phone);
+                    await sendWhatsAppText(phone,
+                        `❌ *Vérification refusée.*\n\nVotre identité n'a pas pu être confirmée. Veuillez réessayer en cliquant sur ce lien :\n\n🔗 ${link}\n\nAssurez-vous d'utiliser un document valide et un bon éclairage.`
+                    );
                 } else {
-                    await sendWhatsAppText(phone, "⚠️ Veuillez envoyer une *photo* de votre pièce d'identité (Carte d'électeur ou Passeport) pour continuer.");
+                    // Still pending — re-send the link.
+                    const link = buildKYCLink(phone);
+                    await sendWhatsAppText(phone,
+                        `⏳ *Vérification en attente…*\n\nSi vous n'avez pas encore commencé, cliquez ici :\n\n🔗 ${link}\n\nVous recevrez une notification dès que votre identité sera confirmée.`
+                    );
                 }
                 break;
+            }
 
             // 🚀 INVITATION ACCEPTANCE ROUTER
             case "INVITED_BUYER":
@@ -1329,8 +1343,7 @@ async function handleInviteAcceptance(phone: string, session: any, supabase: any
     const kycLimit = tx.currency === "USD" ? 500 : 1415000;
     if (tx.base_amount > kycLimit) {
         if (acceptingUser?.kyc_status !== "VERIFIED") {
-            await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
-            return await sendWhatsAppText(phone, `🚨 *Vérification d'Identité Requise*\n\nCette transaction dépasse *${kycLimit} ${tx.currency}*. Les deux parties doivent être vérifiées pour ce montant.\n\nVeuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.\n\nUne fois votre compte vérifié, tapez *BONJOUR* pour reprendre cette transaction.`);
+            return await sendKYCVerificationLink(phone, supabase, `Cette transaction dépasse *${kycLimit} ${tx.currency}*. Les deux parties doivent être vérifiées pour ce montant.`);
         }
     }
 

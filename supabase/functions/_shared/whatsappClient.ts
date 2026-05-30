@@ -133,43 +133,6 @@ export async function sendWhatsAppImage(to: string, mediaId: string, caption: st
     }
 }
 
-export async function processAndStoreKYC(mediaId: string, phone: string, supabase: any) {
-    const WHATSAPP_TOKEN = Deno.env.get("WHATSAPP_TOKEN");
-    
-    // 1. Ask Meta for the temporary download URL
-    const res = await fetch(`https://graph.facebook.com/v18.0/${mediaId}`, {
-        headers: { "Authorization": `Bearer ${WHATSAPP_TOKEN}` }
-    });
-    const mediaData = await res.json();
-    
-    if (!mediaData.url) throw new Error("Could not get media URL from Meta");
-
-    // 2. Download the actual binary file from Meta
-    const fileRes = await fetch(mediaData.url, {
-        headers: { "Authorization": `Bearer ${WHATSAPP_TOKEN}` }
-    });
-    const blob = await fileRes.blob();
-
-    // 3. Upload the file to your Supabase Storage bucket
-    const fileExt = mediaData.mime_type.split('/')[1] || 'jpeg';
-    const fileName = `${phone}_${Date.now()}.${fileExt}`;
-    
-    const { data, error } = await supabase.storage
-        .from('kyc-documents')
-        .upload(fileName, blob, {
-            contentType: mediaData.mime_type,
-            upsert: true
-        });
-
-    if (error) {
-        console.error("Storage Upload Error:", error);
-        throw error;
-    }
-
-    // 4. Generate the permanent Public URL to view it
-    const { data: publicUrlData } = supabase.storage
-        .from('kyc-documents')
-        .getPublicUrl(fileName);
-
-    return publicUrlData.publicUrl;
-}
+// processAndStoreKYC removed: KYC is now handled entirely by Smile ID via the web SDK.
+// Users are sent a link to https://clairtus.com/kyc and verify there. No document
+// images are transmitted or stored through WhatsApp.

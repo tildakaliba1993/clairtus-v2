@@ -188,17 +188,29 @@ Deno.serve(async (req: Request) => {
                 const primaryNet = primaryGross - primaryFee;
                 const secondaryNet = secondaryGross - secondaryFee;
 
-                // 🧾 Send The Transparency Receipt to Buyer
-                let receiptText = `🎉 *Paiement confirmé et fonds libérés !*\n\nMerci d'avoir utilisé Clairtus. Votre transaction de ${tx.base_amount}${tx.currency} est terminée.\n\n🧾 *Bordereau de Transparence :*\nPour votre sécurité absolue, voici les montants nets exacts qui ont été déposés sur les comptes des vendeurs (après déduction de nos frais de plateforme) :\n\n• *${primaryNet.toFixed(2)} ${tx.currency}* envoyés au Vendeur Principal\n`;
-                
-                if (tx.secondary_vendor_phone) {
-                    receiptText += `• *${secondaryNet.toFixed(2)} ${tx.currency}* envoyés au Vendeur Secondaire (${tx.secondary_vendor_phone})\n\n`;
-                } else {
-                    receiptText += "\n";
-                }
-                receiptText += `*Frais totaux de transaction : ${totalFee.toFixed(2)} ${tx.currency}*\n*Clairtus certifie que ces transferts ont été exécutés. Vous ne devez plus rien à personne.*`;
+                // 🧾 Instant Legal Receipt — sent to BOTH parties
+                const kycBase    = Deno.env.get("KYC_BASE_URL") ?? "https://clairtus.com";
+                const receiptUrl = `${kycBase}/receipt/${tx.id}`;
 
-                await sendWhatsAppText(tx.buyer_phone, receiptText);
+                const buyerMsg =
+                    `🎉 *Transaction Confirmée !*\n\n` +
+                    `"${tx.item_description}" — ${tx.base_amount} ${tx.currency}\n\n` +
+                    `🧾 *Votre Reçu Légal Clairtus est prêt :*\n${receiptUrl}\n\n` +
+                    `Ce lien constitue une *preuve légale* de votre paiement. Conservez-le précieusement.\n\n` +
+                    `💰 Récapitulatif :\n` +
+                    `• Vous avez payé : *${depositAmtPayout.toFixed(2)} ${tx.currency}*\n` +
+                    `• Net versé au vendeur : *${primaryNet.toFixed(2)} ${tx.currency}*` +
+                    (tx.secondary_vendor_phone ? `\n• Part vendeur secondaire : *${secondaryNet.toFixed(2)} ${tx.currency}*` : "") +
+                    `\n• Frais d'escrow Clairtus : *${totalFee.toFixed(2)} ${tx.currency}*`;
+
+                const sellerMsg =
+                    `✅ *Fonds Reçus — Transaction Clôturée !*\n\n` +
+                    `"${tx.item_description}" — ${tx.base_amount} ${tx.currency}\n\n` +
+                    `🧾 *Votre Reçu Légal Clairtus :*\n${receiptUrl}\n\n` +
+                    `*Ce reçu certifie que votre paiement de ${primaryNet.toFixed(2)} ${tx.currency} a été effectué.* Partagez-le en cas de litige.`;
+
+                await sendWhatsAppText(tx.buyer_phone, buyerMsg);
+                await sendWhatsAppText(tx.seller_phone, sellerMsg);
 
                 // Increment Trust Scores
                 try {
