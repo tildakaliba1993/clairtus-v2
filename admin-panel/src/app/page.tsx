@@ -192,20 +192,27 @@ export default function AdminPortal() {
 
   const handleAdminAction = async (txId, action, targetPhone = "") => {
     if (!window.confirm(`Confirmer l'action : ${action} ?`)) return;
-    
+
     setActionLoading(action === "BAN_USER" ? targetPhone || "ban" : txId);
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL || ""}/functions/v1/admin-actions`, {
+      const { data: { session: activeSession } } = await supabase.auth.getSession();
+      if (!activeSession) throw new Error("Session expirée — reconnectez-vous.");
+
+      // Route through /api/admin/action (server-side proxy) so ADMIN_SECRET never touches the browser.
+      const response = await fetch("/api/admin/action", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.NEXT_PUBLIC_ADMIN_SECRET || ""}` },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${activeSession.access_token}`,
+        },
         body: JSON.stringify({ action, transaction_id: txId, admin_note: "Intervention via Command Center.", target_phone: targetPhone })
       });
 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Action failed");
-      
+
       toast.success(result.message);
-      fetchDashboardData(true); 
+      fetchDashboardData(true);
       if (selectedTxId && action !== "BAN_USER") setSelectedTxId(null);
     } catch (err) {
       toast.error(err.message);
@@ -558,31 +565,33 @@ export default function AdminPortal() {
               <div>
                 <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">1. Profils Utilisateurs</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5 flex flex-col justify-between">
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1">Vendeur Principal (Bénéficiaire)</p>
-                      <p className="font-mono text-white text-lg">{selectedTx.seller_phone || "Non défini"}</p>
-                    </div>
-                    {userMap[selectedTx.seller_phone] && (
-                      <div className="mt-3 pt-3 border-t border-white/5 flex justify-between items-center text-xs">
-                        <span className="text-gray-400">{userMap[selectedTx.seller_phone].kyc_level}</span>
-                        <span className="font-bold text-emerald-400">Score: {userMap[selectedTx.seller_phone].trust_score}</span>
+                  {[
+                    { label: "Vendeur Principal (Bénéficiaire)", phone: selectedTx.seller_phone },
+                    { label: "Acheteur (Payeur)", phone: selectedTx.buyer_phone },
+                  ].map(({ label, phone: p }) => {
+                    const u = userMap[p];
+                    const kycColors = { VERIFIED: "text-emerald-400", PENDING: "text-amber-400", REJECTED: "text-red-400", UNVERIFIED: "text-gray-400" };
+                    return (
+                      <div key={p} className="bg-[#202c33] p-4 rounded-lg border border-white/5 flex flex-col justify-between">
+                        <div>
+                          <p className="text-xs text-gray-400 mb-1">{label}</p>
+                          <p className="font-mono text-white text-lg">{p || "Non défini"}</p>
+                        </div>
+                        {u && (
+                          <div className="mt-3 pt-3 border-t border-white/5 space-y-1 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">KYC (Smile ID)</span>
+                              <span className={kycColors[u.kyc_status] || "text-gray-400"}>{u.kyc_status || "—"}{u.kyc_result_code ? ` (${u.kyc_result_code})` : ""}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-400">Score confiance</span>
+                              <span className="font-bold text-emerald-400">{u.trust_score ?? "—"}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  
-                  <div className="bg-[#202c33] p-4 rounded-lg border border-white/5 flex flex-col justify-between">
-                    <div>
-                      <p className="text-xs text-gray-400 mb-1">Acheteur (Payeur)</p>
-                      <p className="font-mono text-white text-lg">{selectedTx.buyer_phone || "Non défini"}</p>
-                    </div>
-                    {userMap[selectedTx.buyer_phone] && (
-                      <div className="mt-3 pt-3 border-t border-white/5 flex justify-between items-center text-xs">
-                        <span className="text-gray-400">{userMap[selectedTx.buyer_phone].kyc_level}</span>
-                        <span className="font-bold text-emerald-400">Score: {userMap[selectedTx.buyer_phone].trust_score}</span>
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })}
 
                   {selectedTx.secondary_vendor_phone && (
                     <div className="bg-[#202c33] p-4 rounded-lg border border-blue-500/20 bg-gradient-to-br from-[#202c33] to-blue-900/10 flex flex-col justify-between">

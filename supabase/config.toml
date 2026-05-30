@@ -82,3 +82,9 @@ entrypoint = "./functions/kyc-webhook/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/kyc-webhook/*.html" ]
+
+[functions.smile-id-callback]
+enabled = true
+verify_jwt = false
+import_map = "./functions/smile-id-callback/deno.json"
+entrypoint = "./functions/smile-id-callback/index.ts"
