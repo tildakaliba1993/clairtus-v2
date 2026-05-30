@@ -9,7 +9,10 @@ export const MESSAGES = {
 
   // 1.5 PROMO CODE FLOW
   ASK_PROMO_CODE: (name: string) => `Enchanté ${name} ! 🎉\n\nAvez-vous un code promo exclusif (ex: BETA26) ?\nSi oui, envoyez-le maintenant.\nSi non, répondez simplement *NON*.`,
-  PROMO_CODE_SUCCESS: (code: string) => `✅ Félicitations ! Votre code promo *${code}* a été appliqué avec succès. Vous bénéficiez de frais réduits pour cette session.\n\nTapez *BONJOUR* pour ouvrir le menu principal.`,
+  PROMO_CODE_SUCCESS: (code: string, feePct: number) =>
+    feePct === 0
+      ? `🎉 *Code promo ${code} activé !*\n\n✅ *Zéro frais d'escrow* sur toutes vos transactions.\n\nCe code profite automatiquement aux deux parties — votre acheteur ou vendeur n'aura rien à payer non plus.\n\nTapez *BONJOUR* pour ouvrir le menu.`
+      : `🎉 *Code promo ${code} activé !*\n\n✅ Vos frais d'escrow sont réduits à *${feePct}%* au lieu de 1.5%.\n\nTapez *BONJOUR* pour ouvrir le menu.`,
   PROMO_CODE_INVALID: `❌ Code non reconnu ou expiré.\n\nRépondez *NON* pour continuer sans code, ou réessayez.`,
   REGISTRATION_COMPLETE: `✅ Votre compte Vendeur est créé.\n\nQue souhaitez-vous faire aujourd'hui ?\nTapez *VENDRE* pour initier une transaction sécurisée.`,
 
@@ -56,18 +59,23 @@ export const MESSAGES = {
   SELLER_INVITE_BUTTONS: (buyerPhone: string, itemDescription: string) =>
     `🛡️ Clairtus | Nouveau contrat de sécurité\n\nL'acheteur (${buyerPhone}) vous propose une transaction protégée.\n\n📦 Article : ${itemDescription}\n\nAcceptez-vous cette transaction ?`,
 
-  // Fee arrangement descriptions shown to the invited counterparty
-  FEE_DESCRIPTION_FOR_BUYER: (base: number, currency: string, feeResp: string) => {
-    const fee = parseFloat((base * 0.015).toFixed(2));
-    if (feeResp === 'SELLER') return `💚 *Bonne nouvelle :* le vendeur couvre les frais d'escrow (1.5%). *Vous payez exactement : ${base} ${currency}.*`;
-    if (feeResp === 'BUYER') return `💡 *Les frais d'escrow Clairtus (1.5% = ${fee} ${currency}) sont à votre charge.* Montant total à payer : *${parseFloat((base + fee).toFixed(2))} ${currency}*.`;
+  // Fee arrangement descriptions shown to the invited counterparty.
+  // feePct = 0 means a promo code has waived all fees for the transaction.
+  FEE_DESCRIPTION_FOR_BUYER: (base: number, currency: string, feeResp: string, feePct: number) => {
+    if (feePct === 0) return `🎉 *Zéro frais d'escrow !* Code promo actif sur cette transaction. *Vous payez exactement : ${base} ${currency}.*`;
+    const fee = parseFloat((base * feePct / 100).toFixed(2));
+    const pct = `${feePct}%`;
+    if (feeResp === 'SELLER') return `💚 *Le vendeur couvre les frais d'escrow (${pct}).* Vous payez exactement : *${base} ${currency}.*`;
+    if (feeResp === 'BUYER') return `💡 *Les frais d'escrow Clairtus (${pct} = ${fee} ${currency}) sont à votre charge.* Total à payer : *${parseFloat((base + fee).toFixed(2))} ${currency}.*`;
     const half = parseFloat((fee / 2).toFixed(2));
-    return `🤝 *Frais partagés 50/50.* Votre part : *${half} ${currency}*. Montant total à payer : *${parseFloat((base + half).toFixed(2))} ${currency}*.`;
+    return `🤝 *Frais partagés 50/50.* Votre part : *${half} ${currency}*. Total à payer : *${parseFloat((base + half).toFixed(2))} ${currency}.*`;
   },
-  FEE_DESCRIPTION_FOR_SELLER: (base: number, currency: string, feeResp: string) => {
-    const fee = parseFloat((base * 0.015).toFixed(2));
-    if (feeResp === 'BUYER') return `💚 *Bonne nouvelle :* l'acheteur couvre les frais d'escrow (1.5%). *Vous recevrez : ${base} ${currency} net.*`;
-    if (feeResp === 'SELLER') return `💡 *Les frais d'escrow Clairtus (1.5% = ${fee} ${currency}) sont à votre charge.* Vous recevrez : *${parseFloat((base - fee).toFixed(2))} ${currency} net.*`;
+  FEE_DESCRIPTION_FOR_SELLER: (base: number, currency: string, feeResp: string, feePct: number) => {
+    if (feePct === 0) return `🎉 *Zéro frais d'escrow !* Code promo actif sur cette transaction. *Vous recevrez : ${base} ${currency} net.*`;
+    const fee = parseFloat((base * feePct / 100).toFixed(2));
+    const pct = `${feePct}%`;
+    if (feeResp === 'BUYER') return `💚 *L'acheteur couvre les frais d'escrow (${pct}).* Vous recevrez : *${base} ${currency} net.*`;
+    if (feeResp === 'SELLER') return `💡 *Les frais d'escrow Clairtus (${pct} = ${fee} ${currency}) sont à votre charge.* Vous recevrez : *${parseFloat((base - fee).toFixed(2))} ${currency} net.*`;
     const half = parseFloat((fee / 2).toFixed(2));
     return `🤝 *Frais partagés 50/50.* Votre part : *${half} ${currency}*. Vous recevrez : *${parseFloat((base - half).toFixed(2))} ${currency} net.*`;
   },

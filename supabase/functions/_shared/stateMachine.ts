@@ -16,15 +16,16 @@ export function getDepositAmount(base: number, feePct: number, feeResp?: string 
 }
 
 // Builds the fee responsibility choice message shown to the transaction initiator.
-function buildFeeChoiceMessage(base: number, currency: string, isSellerInitiating: boolean): string {
-    const fee = parseFloat((base * 0.015).toFixed(2));
+// feePct must be > 0 — callers should skip this screen entirely when feePct === 0.
+function buildFeeChoiceMessage(base: number, currency: string, isSellerInitiating: boolean, feePct: number): string {
+    const fee = parseFloat((base * feePct / 100).toFixed(2));
     const buyerTotal = parseFloat((base + fee).toFixed(2));
     const sellerNet = parseFloat((base - fee).toFixed(2));
     const halfFee = parseFloat((fee / 2).toFixed(2));
     const buyerHalfTotal = parseFloat((base + halfFee).toFixed(2));
     const sellerHalfNet = parseFloat((base - halfFee).toFixed(2));
 
-    const header = `💡 *Frais d'escrow Clairtus : 1.5% = ${fee} ${currency}*\n\nQui prend en charge ces frais ?\n\n`;
+    const header = `💡 *Frais d'escrow Clairtus : ${feePct}% = ${fee} ${currency}*\n\nQui prend en charge ces frais ?\n\n`;
     if (isSellerInitiating) {
         return header +
             `• *Vendeur (moi)* → Je reçois *${sellerNet} ${currency}* net\n` +
@@ -267,7 +268,7 @@ export async function processMessage(phone: string, text: string) {
                     if (promo) {
                         await supabase.from("users").update({ promo_code_applied: inputCode }).eq("phone_number", phone);
                         await supabase.from("sessions").update({ current_state: "MAIN_MENU" }).eq("phone_number", phone);
-                        await sendWhatsAppText(phone, MESSAGES.PROMO_CODE_SUCCESS(inputCode));
+                        await sendWhatsAppText(phone, MESSAGES.PROMO_CODE_SUCCESS(inputCode, promo.fee_percentage));
                     } else {
                         await sendWhatsAppText(phone, MESSAGES.PROMO_CODE_INVALID);
                     }
@@ -399,12 +400,25 @@ export async function processMessage(phone: string, text: string) {
                         await supabase.from("sessions").update({ current_state: isSeller ? "AWAITING_PRICE_SELL" : "AWAITING_PRICE_BUY" }).eq("phone_number", phone);
                         await sendWhatsAppText(phone, `🔄 *Reprise de la transaction :*\n${itemTitle}\n\n` + (isSeller ? MESSAGES.PRICE_REQUEST_SELL(itemTitle, tx.currency) : MESSAGES.PRICE_REQUEST_BUY(itemTitle, tx.currency)));
                     } else if (!tx.fee_responsibility) {
-                        const feeState = isSeller ? "AWAITING_FEE_RESPONSIBILITY_SELL" : "AWAITING_FEE_RESPONSIBILITY_BUY";
-                        const feeBtns = isSeller
-                            ? [{ id: "CMD_FEE_SELLER", title: "Vendeur (moi)" }, { id: "CMD_FEE_BUYER", title: "L'Acheteur" }, { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }]
-                            : [{ id: "CMD_FEE_BUYER", title: "Acheteur (moi)" }, { id: "CMD_FEE_SELLER", title: "Le Vendeur" }, { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }];
-                        await supabase.from("sessions").update({ current_state: feeState }).eq("phone_number", phone);
-                        await sendWhatsAppButtons(phone, `🔄 *Reprise :* ${itemTitle}\n\n` + buildFeeChoiceMessage(tx.base_amount, tx.currency, isSeller), feeBtns);
+                        const resumeFeePct = tx.applied_fee_percentage ?? 1.5;
+                        if (resumeFeePct === 0) {
+                            // Promo already applied — save default and skip fee screen
+                            await supabase.from("transactions").update({ fee_responsibility: 'SELLER' }).eq("id", tx.id);
+                            if (isSeller) {
+                                await supabase.from("sessions").update({ current_state: "AWAITING_SPLIT_CHOICE" }).eq("phone_number", phone);
+                                await sendWhatsAppButtons(phone, `🎉 *Code promo actif !*\n\nAucuns frais d'escrow sur cette transaction.\n\n` + MESSAGES.ASK_SPLIT_CHOICE, [{ id: "CMD_OUI_SPLIT", title: "OUI" }, { id: "CMD_NON_SPLIT", title: "NON" }]);
+                            } else {
+                                await supabase.from("sessions").update({ current_state: "AWAITING_COUNTERPARTY_PHONE_BUY" }).eq("phone_number", phone);
+                                await sendWhatsAppText(phone, `🎉 *Code promo actif ! Frais à 0%.*\n\n` + MESSAGES.COUNTERPARTY_PHONE_REQUEST_BUY(tx.base_amount, tx.currency));
+                            }
+                        } else {
+                            const feeState = isSeller ? "AWAITING_FEE_RESPONSIBILITY_SELL" : "AWAITING_FEE_RESPONSIBILITY_BUY";
+                            const feeBtns = isSeller
+                                ? [{ id: "CMD_FEE_SELLER", title: "Vendeur (moi)" }, { id: "CMD_FEE_BUYER", title: "L'Acheteur" }, { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }]
+                                : [{ id: "CMD_FEE_BUYER", title: "Acheteur (moi)" }, { id: "CMD_FEE_SELLER", title: "Le Vendeur" }, { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }];
+                            await supabase.from("sessions").update({ current_state: feeState }).eq("phone_number", phone);
+                            await sendWhatsAppButtons(phone, `🔄 *Reprise :* ${itemTitle}\n\n` + buildFeeChoiceMessage(tx.base_amount, tx.currency, isSeller, resumeFeePct), feeBtns);
+                        }
                     } else if (isSeller && !tx.secondary_vendor_phone && !tx.buyer_phone && tx.status === "DRAFT") {
                         await supabase.from("sessions").update({ current_state: "AWAITING_SPLIT_CHOICE" }).eq("phone_number", phone);
                         await sendWhatsAppButtons(phone, `🔄 *Reprise de la transaction :*\n${itemTitle} (${tx.base_amount} ${tx.currency})\n\n` + MESSAGES.ASK_SPLIT_CHOICE, [
@@ -553,12 +567,23 @@ export async function processMessage(phone: string, text: string) {
                 }
 
                 await supabase.from("transactions").update({ base_amount: priceSell }).eq("id", session.draft_transaction_id);
-                await supabase.from("sessions").update({ current_state: "AWAITING_FEE_RESPONSIBILITY_SELL" }).eq("phone_number", phone);
-                await sendWhatsAppButtons(phone, buildFeeChoiceMessage(priceSell, currentTx.currency, true), [
-                    { id: "CMD_FEE_SELLER", title: "Vendeur (moi)" },
-                    { id: "CMD_FEE_BUYER", title: "L'Acheteur" },
-                    { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }
-                ]);
+                const feePctSell = currentTx.applied_fee_percentage ?? 1.5;
+                if (feePctSell === 0) {
+                    // Promo active — no fee to share, skip directly to split payout choice
+                    await supabase.from("transactions").update({ fee_responsibility: 'SELLER' }).eq("id", session.draft_transaction_id);
+                    await supabase.from("sessions").update({ current_state: "AWAITING_SPLIT_CHOICE" }).eq("phone_number", phone);
+                    await sendWhatsAppButtons(phone, `🎉 *Code promo actif !*\n\nAucuns frais d'escrow ne seront prélevés sur cette transaction. Les deux parties en profitent !\n\n` + MESSAGES.ASK_SPLIT_CHOICE, [
+                        { id: "CMD_OUI_SPLIT", title: "OUI" },
+                        { id: "CMD_NON_SPLIT", title: "NON" }
+                    ]);
+                } else {
+                    await supabase.from("sessions").update({ current_state: "AWAITING_FEE_RESPONSIBILITY_SELL" }).eq("phone_number", phone);
+                    await sendWhatsAppButtons(phone, buildFeeChoiceMessage(priceSell, currentTx.currency, true, feePctSell), [
+                        { id: "CMD_FEE_SELLER", title: "Vendeur (moi)" },
+                        { id: "CMD_FEE_BUYER", title: "L'Acheteur" },
+                        { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }
+                    ]);
+                }
                 break;
             }
 
@@ -618,12 +643,20 @@ export async function processMessage(phone: string, text: string) {
                 }
 
                 await supabase.from("transactions").update({ base_amount: priceBuy }).eq("id", session.draft_transaction_id);
-                await supabase.from("sessions").update({ current_state: "AWAITING_FEE_RESPONSIBILITY_BUY" }).eq("phone_number", phone);
-                await sendWhatsAppButtons(phone, buildFeeChoiceMessage(priceBuy, currentTx.currency, false), [
-                    { id: "CMD_FEE_BUYER", title: "Acheteur (moi)" },
-                    { id: "CMD_FEE_SELLER", title: "Le Vendeur" },
-                    { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }
-                ]);
+                const feePctBuy = currentTx.applied_fee_percentage ?? 1.5;
+                if (feePctBuy === 0) {
+                    // Promo active — skip fee responsibility screen
+                    await supabase.from("transactions").update({ fee_responsibility: 'SELLER' }).eq("id", session.draft_transaction_id);
+                    await supabase.from("sessions").update({ current_state: "AWAITING_COUNTERPARTY_PHONE_BUY" }).eq("phone_number", phone);
+                    await sendWhatsAppText(phone, `🎉 *Code promo actif ! Frais à 0% sur cette transaction.*\n\n` + MESSAGES.COUNTERPARTY_PHONE_REQUEST_BUY(priceBuy, currentTx.currency));
+                } else {
+                    await supabase.from("sessions").update({ current_state: "AWAITING_FEE_RESPONSIBILITY_BUY" }).eq("phone_number", phone);
+                    await sendWhatsAppButtons(phone, buildFeeChoiceMessage(priceBuy, currentTx.currency, false, feePctBuy), [
+                        { id: "CMD_FEE_BUYER", title: "Acheteur (moi)" },
+                        { id: "CMD_FEE_SELLER", title: "Le Vendeur" },
+                        { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }
+                    ]);
+                }
                 break;
             }
 
@@ -665,7 +698,7 @@ export async function processMessage(phone: string, text: string) {
                 await supabase.from("sessions").upsert({ phone_number: counterpartyPhone, current_state: "INVITED_BUYER", draft_transaction_id: session.draft_transaction_id }, { onConflict: 'phone_number' });
                 
                 const sellerScore = user.trust_score ?? 50;
-                const feeBuyerDesc = MESSAGES.FEE_DESCRIPTION_FOR_BUYER(txSell.base_amount, txSell.currency, txSell.fee_responsibility || 'SELLER');
+                const feeBuyerDesc = MESSAGES.FEE_DESCRIPTION_FOR_BUYER(txSell.base_amount, txSell.currency, txSell.fee_responsibility || 'SELLER', txSell.applied_fee_percentage ?? 1.5);
                 const inviteTextSell = `🛡️ *Indice de Confiance du Vendeur : ${sellerScore}/100*\n⭐ (Basé sur l'historique des transactions sur Clairtus)\n\n` +
                     MESSAGES.BUYER_INVITE_BUTTONS(phone, txSell.item_description) +
                     `\n\n${feeBuyerDesc}`;
@@ -710,7 +743,7 @@ export async function processMessage(phone: string, text: string) {
                 await supabase.from("sessions").upsert({ phone_number: counterpartyPhoneBuy, current_state: "INVITED_SELLER", draft_transaction_id: session.draft_transaction_id }, { onConflict: 'phone_number' });
                 
                 const buyerScore = user.trust_score ?? 50;
-                const feeSellerDesc = MESSAGES.FEE_DESCRIPTION_FOR_SELLER(txBuy.base_amount, txBuy.currency, txBuy.fee_responsibility || 'SELLER');
+                const feeSellerDesc = MESSAGES.FEE_DESCRIPTION_FOR_SELLER(txBuy.base_amount, txBuy.currency, txBuy.fee_responsibility || 'SELLER', txBuy.applied_fee_percentage ?? 1.5);
                 const inviteTextBuy = `🛡️ *Indice de Confiance de l'Acheteur : ${buyerScore}/100*\n⭐ (Basé sur l'historique des transactions sur Clairtus)\n\n` +
                     MESSAGES.SELLER_INVITE_BUTTONS(phone, txBuy.item_description) +
                     `\n\n${feeSellerDesc}`;
@@ -780,14 +813,14 @@ export async function processMessage(phone: string, text: string) {
                     if (session.current_state === "INVITED_BUYER") {
                         const { data: sellerInfo } = await supabase.from("users").select("trust_score").eq("phone_number", tx.seller_phone).single();
                         const score = sellerInfo?.trust_score ?? 50;
-                        const feeDescB = MESSAGES.FEE_DESCRIPTION_FOR_BUYER(tx.base_amount, tx.currency, tx.fee_responsibility || 'SELLER');
+                        const feeDescB = MESSAGES.FEE_DESCRIPTION_FOR_BUYER(tx.base_amount, tx.currency, tx.fee_responsibility || 'SELLER', tx.applied_fee_percentage ?? 1.5);
                         await sendWhatsAppButtons(phone, `🛡️ *Indice de Confiance du Vendeur : ${score}/100*\n\n` + MESSAGES.BUYER_INVITE_BUTTONS(tx.seller_phone, tx.item_description) + `\n\n${feeDescB}`, [
                             { id: "CMD_ACCEPTER", title: "ACCEPTER" }, { id: "CMD_REFUSER", title: "REFUSER" }, { id: "CMD_AIDE", title: "AIDE" }
                         ]);
                     } else {
                         const { data: buyerInfo } = await supabase.from("users").select("trust_score").eq("phone_number", tx.buyer_phone).single();
                         const score = buyerInfo?.trust_score ?? 50;
-                        const feeDescS = MESSAGES.FEE_DESCRIPTION_FOR_SELLER(tx.base_amount, tx.currency, tx.fee_responsibility || 'SELLER');
+                        const feeDescS = MESSAGES.FEE_DESCRIPTION_FOR_SELLER(tx.base_amount, tx.currency, tx.fee_responsibility || 'SELLER', tx.applied_fee_percentage ?? 1.5);
                         await sendWhatsAppButtons(phone, `🛡️ *Indice de Confiance de l'Acheteur : ${score}/100*\n\n` + MESSAGES.SELLER_INVITE_BUTTONS(tx.buyer_phone, tx.item_description) + `\n\n${feeDescS}`, [
                             { id: "CMD_ACCEPTER", title: "ACCEPTER" }, { id: "CMD_REFUSER", title: "REFUSER" }, { id: "CMD_AIDE", title: "AIDE" }
                         ]);
@@ -1287,14 +1320,53 @@ export async function processMessage(phone: string, text: string) {
 async function handleInviteAcceptance(phone: string, session: any, supabase: any) {
     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
+    // Fetch accepting user once — used for both KYC check and promo check below.
+    const { data: acceptingUser } = await supabase.from("users")
+        .select("kyc_status, promo_code_applied")
+        .eq("phone_number", phone).single();
+
     // 🛡️ COMPLIANCE: KYC GATE FOR THE COUNTERPARTY ON HIGH-VALUE TRANSACTIONS
-    // The initiating party was already checked at price entry. This covers the invited side.
     const kycLimit = tx.currency === "USD" ? 500 : 1415000;
     if (tx.base_amount > kycLimit) {
-        const { data: acceptingUser } = await supabase.from("users").select("kyc_status").eq("phone_number", phone).single();
         if (acceptingUser?.kyc_status !== "VERIFIED") {
             await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
             return await sendWhatsAppText(phone, `🚨 *Vérification d'Identité Requise*\n\nCette transaction dépasse *${kycLimit} ${tx.currency}*. Les deux parties doivent être vérifiées pour ce montant.\n\nVeuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.\n\nUne fois votre compte vérifié, tapez *BONJOUR* pour reprendre cette transaction.`);
+        }
+    }
+
+    // 🎫 PROMO CHECK: If the accepting party has a promo code better than the current fee, apply it.
+    // This covers the case where the initiator didn't have a promo but the counterparty does.
+    const currentFeePct = tx.applied_fee_percentage ?? 1.5;
+    if (currentFeePct > 0 && acceptingUser?.promo_code_applied) {
+        const { data: promoData } = await supabase.from("promo_codes")
+            .select("fee_percentage")
+            .eq("code_name", acceptingUser.promo_code_applied)
+            .eq("is_active", true)
+            .gt("expires_at", new Date().toISOString())
+            .single();
+
+        if (promoData !== null && promoData.fee_percentage < currentFeePct) {
+            const newFee = promoData.fee_percentage;
+            await supabase.from("transactions").update({
+                applied_fee_percentage: newFee,
+                // When fee = 0 the responsibility choice is moot — default to SELLER
+                fee_responsibility: newFee === 0 ? 'SELLER' : tx.fee_responsibility
+            }).eq("id", tx.id);
+            tx.applied_fee_percentage = newFee;
+            if (newFee === 0) tx.fee_responsibility = 'SELLER';
+
+            const msg = newFee === 0
+                ? `🎉 *Code promo appliqué !*\n\nVotre code promo a supprimé tous les frais d'escrow sur cette transaction. Aucune charge pour aucune des deux parties !`
+                : `🎉 *Code promo appliqué !*\n\nVotre code promo a réduit les frais d'escrow à ${newFee}% sur cette transaction.`;
+            await sendWhatsAppText(phone, msg);
+
+            const otherPhone = tx.seller_phone === phone ? tx.buyer_phone : tx.seller_phone;
+            if (otherPhone) {
+                const notif = newFee === 0
+                    ? `🎉 *Bonne nouvelle !*\n\nL'autre partie a un code promo. *Aucuns frais d'escrow* ne seront prélevés sur cette transaction !`
+                    : `🎉 *Bonne nouvelle !*\n\nL'autre partie a un code promo. Les frais d'escrow ont été réduits à ${newFee}% !`;
+                await sendWhatsAppText(otherPhone, notif);
+            }
         }
     }
 
