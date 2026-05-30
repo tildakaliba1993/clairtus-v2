@@ -35,7 +35,12 @@ Deno.serve(async (req: Request) => {
 
     // 🟢 SCENARIO 1: ADMIN WINS FOR SELLER (Force Payout)
     if (resolution === "PAYOUT_SELLER") {
-      const payoutAmount = Number((tx.base_amount * 0.975).toFixed(2)); // Subtract Clairtus Fee
+      const feePct = tx.applied_fee_percentage ?? 1.5;
+      const fee = tx.base_amount * feePct / 100;
+      const depositAmt = tx.fee_responsibility === 'BUYER' ? parseFloat((tx.base_amount + fee).toFixed(2)) :
+                         tx.fee_responsibility === 'SPLIT' ? parseFloat((tx.base_amount + fee / 2).toFixed(2)) :
+                         tx.base_amount;
+      const payoutAmount = parseFloat((depositAmt - Math.round(tx.base_amount * feePct / 100)).toFixed(2));
       await initiatePawaPayPayout(actionId, tx.seller_phone, payoutAmount, tx.currency);
       
       await supabase.from("transactions").update({ status: "COMPLETED", pawapay_payout_id: actionId }).eq("id", tx.id);
@@ -46,7 +51,11 @@ Deno.serve(async (req: Request) => {
     
     // 🔴 SCENARIO 2: ADMIN WINS FOR BUYER (Force Refund)
     else if (resolution === "REFUND_BUYER") {
-      await initiatePawaPayPayout(actionId, tx.buyer_phone, tx.base_amount, tx.currency);
+      const consoleFee = tx.base_amount * (tx.applied_fee_percentage ?? 1.5) / 100;
+      const consoleRefundAmt = tx.fee_responsibility === 'BUYER' ? parseFloat((tx.base_amount + consoleFee).toFixed(2)) :
+                               tx.fee_responsibility === 'SPLIT' ? parseFloat((tx.base_amount + consoleFee / 2).toFixed(2)) :
+                               tx.base_amount;
+      await initiatePawaPayPayout(actionId, tx.buyer_phone, consoleRefundAmt, tx.currency);
       
       await supabase.from("transactions").update({ status: "REFUNDED" }).eq("id", tx.id);
       

@@ -38,28 +38,32 @@ Deno.serve(async (req: Request) => {
 
         if (fetchError || !tx) return new Response("Transaction Not Found", { status: 404, headers: corsHeaders });
 
-        // 🟢 ACTION: FORCE_RELEASE 
+        // 🟢 ACTION: FORCE_RELEASE
         if (action === "FORCE_RELEASE") {
             if (tx.status !== "FUNDED" && tx.status !== "DISPUTED") {
                 return new Response("Invalid transaction status", { status: 400, headers: corsHeaders });
             }
 
-            const feePercentage = tx.applied_fee_percentage ?? 2.5; 
+            const feePercentage = tx.applied_fee_percentage ?? 1.5;
             const feeMultiplier = feePercentage / 100;
-            
-            let primaryGross = tx.base_amount;
-            let secondaryGross = 0;
 
+            const depositAmt = (() => {
+                const fee = tx.base_amount * feePercentage / 100;
+                if (tx.fee_responsibility === 'BUYER') return parseFloat((tx.base_amount + fee).toFixed(2));
+                if (tx.fee_responsibility === 'SPLIT') return parseFloat((tx.base_amount + fee / 2).toFixed(2));
+                return tx.base_amount;
+            })();
+
+            let secondaryGross = 0;
             if (tx.secondary_vendor_phone && tx.secondary_vendor_amount) {
                 secondaryGross = Number(tx.secondary_vendor_amount);
-                primaryGross = tx.base_amount - secondaryGross;
             }
 
             const secondaryFee = Math.round(secondaryGross * feeMultiplier);
             const totalFee = Math.round(tx.base_amount * feeMultiplier);
-            const primaryFee = totalFee - secondaryFee; 
+            const primaryFee = totalFee - secondaryFee;
 
-            const primaryNet = primaryGross - primaryFee;
+            const primaryNet = parseFloat((depositAmt - secondaryGross - totalFee).toFixed(2));
             const secondaryNet = secondaryGross - secondaryFee;
 
             // 🚀 THE FIX: True UUID generation for PawaPay
@@ -115,7 +119,11 @@ Deno.serve(async (req: Request) => {
             }
 
             const refundId = crypto.randomUUID();
-            await initiatePawaPayPayout(refundId, tx.buyer_phone, tx.base_amount, tx.currency);
+            const refundFee = tx.base_amount * (tx.applied_fee_percentage ?? 1.5) / 100;
+            const refundDepositAmt = tx.fee_responsibility === 'BUYER' ? parseFloat((tx.base_amount + refundFee).toFixed(2)) :
+                                     tx.fee_responsibility === 'SPLIT' ? parseFloat((tx.base_amount + refundFee / 2).toFixed(2)) :
+                                     tx.base_amount;
+            await initiatePawaPayPayout(refundId, tx.buyer_phone, refundDepositAmt, tx.currency);
 
             const { error: updateError } = await supabase.from("transactions").update({ 
                 status: "REFUNDED", 

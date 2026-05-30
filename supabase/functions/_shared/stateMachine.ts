@@ -5,8 +5,37 @@ import { MESSAGES } from "./whatsappMessaging.ts";
 import { initiatePawaPayPayout, initiatePawaPayDeposit } from "./pawapayClient.ts"; 
 import { notifyAdmin } from "./adminAlerts.ts";
 
-// 🛡️ COMPLIANCE: Added the Legal Link directly into the WhatsApp T&Cs
-const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 2.5% de frais sur la vente.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n\n🔗 *Conditions & Confidentialité :* https://clairtus.com\n\nEn continuant, vous acceptez ces conditions.";
+const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 1.5% de frais d'escrow, répartis selon l'accord entre les parties.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n\n🔗 *Conditions & Confidentialité :* https://clairtus.com\n\nEn continuant, vous acceptez ces conditions.";
+
+// Computes the actual deposit amount the buyer pays based on who covers the escrow fee.
+export function getDepositAmount(base: number, feePct: number, feeResp?: string | null): number {
+    const fee = base * feePct / 100;
+    if (feeResp === 'BUYER') return parseFloat((base + fee).toFixed(2));
+    if (feeResp === 'SPLIT') return parseFloat((base + fee / 2).toFixed(2));
+    return base; // SELLER (default)
+}
+
+// Builds the fee responsibility choice message shown to the transaction initiator.
+function buildFeeChoiceMessage(base: number, currency: string, isSellerInitiating: boolean): string {
+    const fee = parseFloat((base * 0.015).toFixed(2));
+    const buyerTotal = parseFloat((base + fee).toFixed(2));
+    const sellerNet = parseFloat((base - fee).toFixed(2));
+    const halfFee = parseFloat((fee / 2).toFixed(2));
+    const buyerHalfTotal = parseFloat((base + halfFee).toFixed(2));
+    const sellerHalfNet = parseFloat((base - halfFee).toFixed(2));
+
+    const header = `💡 *Frais d'escrow Clairtus : 1.5% = ${fee} ${currency}*\n\nQui prend en charge ces frais ?\n\n`;
+    if (isSellerInitiating) {
+        return header +
+            `• *Vendeur (moi)* → Je reçois *${sellerNet} ${currency}* net\n` +
+            `• *L'Acheteur* → Il paie *${buyerTotal} ${currency}* au total\n` +
+            `• *50/50* → Je reçois *${sellerHalfNet} ${currency}*, il paie *${buyerHalfTotal} ${currency}*`;
+    }
+    return header +
+        `• *Acheteur (moi)* → Je paie *${buyerTotal} ${currency}* au total\n` +
+        `• *Le Vendeur* → Il reçoit *${sellerNet} ${currency}* net\n` +
+        `• *50/50* → Je paie *${buyerHalfTotal} ${currency}*, il reçoit *${sellerHalfNet} ${currency}* net`;
+}
 
 // 🔧 STRICT MNO IDENTIFIER 
 export function getNetworkInfo(phone: string) {
@@ -130,7 +159,8 @@ export async function processMessage(phone: string, text: string) {
                         await sendWhatsAppText(phone, "⏳ Annulation confirmée. Le remboursement de l'acheteur est en cours de traitement...");
                         try {
                             const refundId = crypto.randomUUID();
-                            await initiatePawaPayPayout(refundId, txToCancel.buyer_phone, txToCancel.base_amount, txToCancel.currency);
+                            const cancelRefundAmt = getDepositAmount(txToCancel.base_amount, txToCancel.applied_fee_percentage ?? 1.5, txToCancel.fee_responsibility);
+                            await initiatePawaPayPayout(refundId, txToCancel.buyer_phone, cancelRefundAmt, txToCancel.currency);
                             await supabase.from("transactions").update({ status: "REFUNDED", pawapay_refund_id: refundId }).eq("id", txToCancel.id);
                             await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
                             await sendWhatsAppText(phone, "☑️ Le contrat a été annulé et les fonds ont été retournés à l'acheteur.");
@@ -368,6 +398,13 @@ export async function processMessage(phone: string, text: string) {
                     } else if (!tx.base_amount) {
                         await supabase.from("sessions").update({ current_state: isSeller ? "AWAITING_PRICE_SELL" : "AWAITING_PRICE_BUY" }).eq("phone_number", phone);
                         await sendWhatsAppText(phone, `🔄 *Reprise de la transaction :*\n${itemTitle}\n\n` + (isSeller ? MESSAGES.PRICE_REQUEST_SELL(itemTitle, tx.currency) : MESSAGES.PRICE_REQUEST_BUY(itemTitle, tx.currency)));
+                    } else if (!tx.fee_responsibility) {
+                        const feeState = isSeller ? "AWAITING_FEE_RESPONSIBILITY_SELL" : "AWAITING_FEE_RESPONSIBILITY_BUY";
+                        const feeBtns = isSeller
+                            ? [{ id: "CMD_FEE_SELLER", title: "Vendeur (moi)" }, { id: "CMD_FEE_BUYER", title: "L'Acheteur" }, { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }]
+                            : [{ id: "CMD_FEE_BUYER", title: "Acheteur (moi)" }, { id: "CMD_FEE_SELLER", title: "Le Vendeur" }, { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }];
+                        await supabase.from("sessions").update({ current_state: feeState }).eq("phone_number", phone);
+                        await sendWhatsAppButtons(phone, `🔄 *Reprise :* ${itemTitle}\n\n` + buildFeeChoiceMessage(tx.base_amount, tx.currency, isSeller), feeBtns);
                     } else if (isSeller && !tx.secondary_vendor_phone && !tx.buyer_phone && tx.status === "DRAFT") {
                         await supabase.from("sessions").update({ current_state: "AWAITING_SPLIT_CHOICE" }).eq("phone_number", phone);
                         await sendWhatsAppButtons(phone, `🔄 *Reprise de la transaction :*\n${itemTitle} (${tx.base_amount} ${tx.currency})\n\n` + MESSAGES.ASK_SPLIT_CHOICE, [
@@ -405,7 +442,7 @@ export async function processMessage(phone: string, text: string) {
             case "AWAITING_ITEM_DESCRIPTION_SELL": {
                 const sellRef = "CLT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
                 
-                let appliedFee = 2.5; 
+                let appliedFee = 1.5;
                 if (user.promo_code_applied) {
                     const { data: promo } = await supabase.from("promo_codes")
                         .select("*")
@@ -428,7 +465,7 @@ export async function processMessage(phone: string, text: string) {
             case "AWAITING_ITEM_DESCRIPTION_BUY": {
                 const buyRef = "CLT-" + Math.random().toString(36).substring(2, 10).toUpperCase();
                 
-                let appliedFee = 2.5;
+                let appliedFee = 1.5;
                 if (user.promo_code_applied) {
                     const { data: promo } = await supabase.from("promo_codes")
                         .select("*")
@@ -472,6 +509,35 @@ export async function processMessage(phone: string, text: string) {
                 break;
             }
 
+            // 🤝 FEE RESPONSIBILITY SELECTION
+            case "AWAITING_FEE_RESPONSIBILITY_SELL":
+            case "AWAITING_FEE_RESPONSIBILITY_BUY": {
+                const isSellFeeState = session.current_state === "AWAITING_FEE_RESPONSIBILITY_SELL";
+                let feeResp: string | null = null;
+                if (cleanText === "CMD_FEE_SELLER") feeResp = "SELLER";
+                else if (cleanText === "CMD_FEE_BUYER") feeResp = "BUYER";
+                else if (cleanText === "CMD_FEE_SPLIT") feeResp = "SPLIT";
+
+                if (!feeResp) {
+                    return await sendWhatsAppText(phone, "⚠️ Veuillez utiliser les boutons pour choisir qui couvre les frais.");
+                }
+
+                await supabase.from("transactions").update({ fee_responsibility: feeResp }).eq("id", session.draft_transaction_id);
+
+                if (isSellFeeState) {
+                    await supabase.from("sessions").update({ current_state: "AWAITING_SPLIT_CHOICE" }).eq("phone_number", phone);
+                    await sendWhatsAppButtons(phone, MESSAGES.ASK_SPLIT_CHOICE, [
+                        { id: "CMD_OUI_SPLIT", title: "OUI" },
+                        { id: "CMD_NON_SPLIT", title: "NON" }
+                    ]);
+                } else {
+                    const { data: txFee } = await supabase.from("transactions").select("base_amount, currency").eq("id", session.draft_transaction_id).single();
+                    await supabase.from("sessions").update({ current_state: "AWAITING_COUNTERPARTY_PHONE_BUY" }).eq("phone_number", phone);
+                    await sendWhatsAppText(phone, MESSAGES.COUNTERPARTY_PHONE_REQUEST_BUY(txFee.base_amount, txFee.currency));
+                }
+                break;
+            }
+
             // 🚀 SPLIT PAYOUT (VENDOR INITIATED FLOW)
             case "AWAITING_PRICE_SELL": {
                 const priceSell = parseFloat(cleanText.replace(',', '.'));
@@ -487,10 +553,11 @@ export async function processMessage(phone: string, text: string) {
                 }
 
                 await supabase.from("transactions").update({ base_amount: priceSell }).eq("id", session.draft_transaction_id);
-                await supabase.from("sessions").update({ current_state: "AWAITING_SPLIT_CHOICE" }).eq("phone_number", phone);
-                await sendWhatsAppButtons(phone, MESSAGES.ASK_SPLIT_CHOICE, [
-                    { id: "CMD_OUI_SPLIT", title: "OUI" },
-                    { id: "CMD_NON_SPLIT", title: "NON" }
+                await supabase.from("sessions").update({ current_state: "AWAITING_FEE_RESPONSIBILITY_SELL" }).eq("phone_number", phone);
+                await sendWhatsAppButtons(phone, buildFeeChoiceMessage(priceSell, currentTx.currency, true), [
+                    { id: "CMD_FEE_SELLER", title: "Vendeur (moi)" },
+                    { id: "CMD_FEE_BUYER", title: "L'Acheteur" },
+                    { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }
                 ]);
                 break;
             }
@@ -551,8 +618,12 @@ export async function processMessage(phone: string, text: string) {
                 }
 
                 await supabase.from("transactions").update({ base_amount: priceBuy }).eq("id", session.draft_transaction_id);
-                await supabase.from("sessions").update({ current_state: "AWAITING_COUNTERPARTY_PHONE_BUY" }).eq("phone_number", phone);
-                await sendWhatsAppText(phone, MESSAGES.COUNTERPARTY_PHONE_REQUEST_BUY(priceBuy, currentTx.currency));
+                await supabase.from("sessions").update({ current_state: "AWAITING_FEE_RESPONSIBILITY_BUY" }).eq("phone_number", phone);
+                await sendWhatsAppButtons(phone, buildFeeChoiceMessage(priceBuy, currentTx.currency, false), [
+                    { id: "CMD_FEE_BUYER", title: "Acheteur (moi)" },
+                    { id: "CMD_FEE_SELLER", title: "Le Vendeur" },
+                    { id: "CMD_FEE_SPLIT", title: "50/50 Partager" }
+                ]);
                 break;
             }
 
@@ -593,10 +664,12 @@ export async function processMessage(phone: string, text: string) {
                 await supabase.from("users").upsert({ phone_number: counterpartyPhone }, { onConflict: 'phone_number' });
                 await supabase.from("sessions").upsert({ phone_number: counterpartyPhone, current_state: "INVITED_BUYER", draft_transaction_id: session.draft_transaction_id }, { onConflict: 'phone_number' });
                 
-                // 🛡️ UX FIX: Inject the Seller's Trust Score into the invite
                 const sellerScore = user.trust_score ?? 50;
-                const inviteTextSell = `🛡️ *Indice de Confiance du Vendeur : ${sellerScore}/100*\n⭐ (Basé sur l'historique des transactions sur Clairtus)\n\n` + MESSAGES.BUYER_INVITE_BUTTONS(phone, txSell.item_description);
-                
+                const feeBuyerDesc = MESSAGES.FEE_DESCRIPTION_FOR_BUYER(txSell.base_amount, txSell.currency, txSell.fee_responsibility || 'SELLER');
+                const inviteTextSell = `🛡️ *Indice de Confiance du Vendeur : ${sellerScore}/100*\n⭐ (Basé sur l'historique des transactions sur Clairtus)\n\n` +
+                    MESSAGES.BUYER_INVITE_BUTTONS(phone, txSell.item_description) +
+                    `\n\n${feeBuyerDesc}`;
+
                 await sendWhatsAppButtons(counterpartyPhone, inviteTextSell, [
                     { id: "CMD_ACCEPTER", title: "ACCEPTER" }, { id: "CMD_REFUSER", title: "REFUSER" }, { id: "CMD_AIDE", title: "AIDE" }
                 ]);
@@ -636,10 +709,12 @@ export async function processMessage(phone: string, text: string) {
                 await supabase.from("users").upsert({ phone_number: counterpartyPhoneBuy }, { onConflict: 'phone_number' });
                 await supabase.from("sessions").upsert({ phone_number: counterpartyPhoneBuy, current_state: "INVITED_SELLER", draft_transaction_id: session.draft_transaction_id }, { onConflict: 'phone_number' });
                 
-                // 🛡️ UX FIX: Inject the Buyer's Trust Score into the invite
                 const buyerScore = user.trust_score ?? 50;
-                const inviteTextBuy = `🛡️ *Indice de Confiance de l'Acheteur : ${buyerScore}/100*\n⭐ (Basé sur l'historique des transactions sur Clairtus)\n\n` + MESSAGES.SELLER_INVITE_BUTTONS(phone, txBuy.item_description);
-                
+                const feeSellerDesc = MESSAGES.FEE_DESCRIPTION_FOR_SELLER(txBuy.base_amount, txBuy.currency, txBuy.fee_responsibility || 'SELLER');
+                const inviteTextBuy = `🛡️ *Indice de Confiance de l'Acheteur : ${buyerScore}/100*\n⭐ (Basé sur l'historique des transactions sur Clairtus)\n\n` +
+                    MESSAGES.SELLER_INVITE_BUTTONS(phone, txBuy.item_description) +
+                    `\n\n${feeSellerDesc}`;
+
                 await sendWhatsAppButtons(counterpartyPhoneBuy, inviteTextBuy, [
                     { id: "CMD_ACCEPTER", title: "ACCEPTER" }, { id: "CMD_REFUSER", title: "REFUSER" }, { id: "CMD_AIDE", title: "AIDE" }
                 ]);
@@ -703,19 +778,17 @@ export async function processMessage(phone: string, text: string) {
                     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
                     
                     if (session.current_state === "INVITED_BUYER") {
-                        // Fetch the Seller's score
                         const { data: sellerInfo } = await supabase.from("users").select("trust_score").eq("phone_number", tx.seller_phone).single();
                         const score = sellerInfo?.trust_score ?? 50;
-                        
-                        await sendWhatsAppButtons(phone, `🛡️ *Indice de Confiance du Vendeur : ${score}/100*\n\n` + MESSAGES.BUYER_INVITE_BUTTONS(tx.seller_phone, tx.item_description), [
+                        const feeDescB = MESSAGES.FEE_DESCRIPTION_FOR_BUYER(tx.base_amount, tx.currency, tx.fee_responsibility || 'SELLER');
+                        await sendWhatsAppButtons(phone, `🛡️ *Indice de Confiance du Vendeur : ${score}/100*\n\n` + MESSAGES.BUYER_INVITE_BUTTONS(tx.seller_phone, tx.item_description) + `\n\n${feeDescB}`, [
                             { id: "CMD_ACCEPTER", title: "ACCEPTER" }, { id: "CMD_REFUSER", title: "REFUSER" }, { id: "CMD_AIDE", title: "AIDE" }
                         ]);
                     } else {
-                        // Fetch the Buyer's score
                         const { data: buyerInfo } = await supabase.from("users").select("trust_score").eq("phone_number", tx.buyer_phone).single();
                         const score = buyerInfo?.trust_score ?? 50;
-                        
-                        await sendWhatsAppButtons(phone, `🛡️ *Indice de Confiance de l'Acheteur : ${score}/100*\n\n` + MESSAGES.SELLER_INVITE_BUTTONS(tx.buyer_phone, tx.item_description), [
+                        const feeDescS = MESSAGES.FEE_DESCRIPTION_FOR_SELLER(tx.base_amount, tx.currency, tx.fee_responsibility || 'SELLER');
+                        await sendWhatsAppButtons(phone, `🛡️ *Indice de Confiance de l'Acheteur : ${score}/100*\n\n` + MESSAGES.SELLER_INVITE_BUTTONS(tx.buyer_phone, tx.item_description) + `\n\n${feeDescS}`, [
                             { id: "CMD_ACCEPTER", title: "ACCEPTER" }, { id: "CMD_REFUSER", title: "REFUSER" }, { id: "CMD_AIDE", title: "AIDE" }
                         ]);
                     }
@@ -830,7 +903,7 @@ export async function processMessage(phone: string, text: string) {
                         await new Promise(resolve => setTimeout(resolve, 5000));
                         const newDepositId = crypto.randomUUID();
                         await supabase.from("transactions").update({ pawapay_deposit_id: newDepositId }).eq("id", tx.id);
-                        await initiatePawaPayDeposit(newDepositId, phone, tx.base_amount, tx.currency);
+                        await initiatePawaPayDeposit(newDepositId, phone, getDepositAmount(tx.base_amount, tx.applied_fee_percentage ?? 1.5, tx.fee_responsibility), tx.currency);
                         await supabase.from("sessions").update({ current_state: "AWAITING_DEPOSIT_CONFIRMATION" }).eq("phone_number", phone);
                     } catch (error) {
                         console.error("Payment Initiation Error:", error);
@@ -889,7 +962,7 @@ export async function processMessage(phone: string, text: string) {
                 
                 try {
                     await new Promise(resolve => setTimeout(resolve, 5000));
-                    await initiatePawaPayDeposit(newDepositId, newPhone, txToUpdate.base_amount, txToUpdate.currency);
+                    await initiatePawaPayDeposit(newDepositId, newPhone, getDepositAmount(txToUpdate.base_amount, txToUpdate.applied_fee_percentage ?? 1.5, txToUpdate.fee_responsibility), txToUpdate.currency);
                 } catch (error) {
                     await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", phone);
                     await sendWhatsAppText(phone, "❌ Erreur de réseau avec le nouvel opérateur. Veuillez répondre REESSAYER pour tenter à nouveau.");
@@ -914,7 +987,7 @@ export async function processMessage(phone: string, text: string) {
                     await supabase.from("transactions").update({ pawapay_deposit_id: newDepositId }).eq("id", tx.id);
                     try {
                         await new Promise(resolve => setTimeout(resolve, 5000));
-                        await initiatePawaPayDeposit(newDepositId, tx.buyer_phone, tx.base_amount, tx.currency);
+                        await initiatePawaPayDeposit(newDepositId, tx.buyer_phone, getDepositAmount(tx.base_amount, tx.applied_fee_percentage ?? 1.5, tx.fee_responsibility), tx.currency);
                     } catch (error) {
                         await sendWhatsAppText(phone, "❌ Erreur opérateur. Veuillez patienter.");
                     }
@@ -945,21 +1018,20 @@ export async function processMessage(phone: string, text: string) {
                     try {
                         await sendWhatsAppText(phone, MESSAGES.PAYOUT_INITIATED);
 
-                        const feePercentage = txFunded.applied_fee_percentage ?? 2.5;
+                        const feePercentage = txFunded.applied_fee_percentage ?? 1.5;
                         const feeMultiplier = feePercentage / 100;
-                        let primaryGross = txFunded.base_amount;
+                        const depositAmt = getDepositAmount(txFunded.base_amount, feePercentage, txFunded.fee_responsibility);
                         let secondaryGross = 0;
 
                         if (txFunded.secondary_vendor_phone && txFunded.secondary_vendor_amount) {
                             secondaryGross = Number(txFunded.secondary_vendor_amount);
-                            primaryGross = txFunded.base_amount - secondaryGross;
                         }
 
                         const secondaryFee = Math.round(secondaryGross * feeMultiplier);
                         const totalFee = Math.round(txFunded.base_amount * feeMultiplier);
-                        const primaryFee = totalFee - secondaryFee; 
+                        const primaryFee = totalFee - secondaryFee;
 
-                        const primaryNet = primaryGross - primaryFee;
+                        const primaryNet = parseFloat((depositAmt - secondaryGross - totalFee).toFixed(2));
                         const secondaryNet = secondaryGross - secondaryFee;
 
                         const primaryPayoutId = crypto.randomUUID();
@@ -1047,21 +1119,20 @@ export async function processMessage(phone: string, text: string) {
             case "AWAITING_NEW_PAYOUT_NUMBER": {
                 const { data: txToPay } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
-                const feePercentage = txToPay.applied_fee_percentage ?? 2.5;
+                const feePercentage = txToPay.applied_fee_percentage ?? 1.5;
                 const feeMultiplier = feePercentage / 100;
-                let primaryGross = txToPay.base_amount;
+                const depositAmtPay = getDepositAmount(txToPay.base_amount, feePercentage, txToPay.fee_responsibility);
                 let secondaryGross = 0;
 
                 if (txToPay.secondary_vendor_phone && txToPay.secondary_vendor_amount) {
                     secondaryGross = Number(txToPay.secondary_vendor_amount);
-                    primaryGross = txToPay.base_amount - secondaryGross;
                 }
 
                 const secondaryFee = Math.round(secondaryGross * feeMultiplier);
                 const totalFee = Math.round(txToPay.base_amount * feeMultiplier);
-                const primaryFee = totalFee - secondaryFee; 
+                const primaryFee = totalFee - secondaryFee;
 
-                const primaryNet = primaryGross - primaryFee;
+                const primaryNet = parseFloat((depositAmtPay - secondaryGross - totalFee).toFixed(2));
                 const secondaryNet = secondaryGross - secondaryFee;
 
                 let isRetryCommand = cleanText.toUpperCase() === "RÉESSAYER" || cleanText.toUpperCase() === "REESSAYER";
@@ -1156,7 +1227,8 @@ export async function processMessage(phone: string, text: string) {
                     await sendWhatsAppText(phone, "⏳ Annulation acceptée. Remboursement en cours...");
                     try {
                         const refundId = crypto.randomUUID();
-                        await initiatePawaPayPayout(refundId, cancelTx.buyer_phone, cancelTx.base_amount, cancelTx.currency);
+                        const cancelApprovalRefundAmt = getDepositAmount(cancelTx.base_amount, cancelTx.applied_fee_percentage ?? 1.5, cancelTx.fee_responsibility);
+                        await initiatePawaPayPayout(refundId, cancelTx.buyer_phone, cancelApprovalRefundAmt, cancelTx.currency);
                         await supabase.from("transactions").update({ status: "REFUNDED", pawapay_refund_id: refundId }).eq("id", cancelTx.id);
                         await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", phone);
                         await sendWhatsAppText(phone, "☑️ Dossier clos. L'acheteur a été remboursé.");
@@ -1318,7 +1390,7 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
         await new Promise(resolve => setTimeout(resolve, 5000));
         const newDepositId = crypto.randomUUID();
         await supabase.from("transactions").update({ pawapay_deposit_id: newDepositId }).eq("id", tx.id);
-        await initiatePawaPayDeposit(newDepositId, buyerPhone, tx.base_amount, tx.currency);
+        await initiatePawaPayDeposit(newDepositId, buyerPhone, getDepositAmount(tx.base_amount, tx.applied_fee_percentage ?? 1.5, tx.fee_responsibility), tx.currency);
     } catch (error) {
         await supabase.from("sessions").update({ current_state: "AWAITING_PAYMENT_BUYER" }).eq("phone_number", buyerPhone);
         await sendWhatsAppText(buyerPhone, "❌ Erreur de réseau avec l'opérateur. Veuillez répondre REESSAYER pour tenter à nouveau.");

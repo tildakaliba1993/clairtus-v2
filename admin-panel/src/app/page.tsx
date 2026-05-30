@@ -217,7 +217,7 @@ export default function AdminPortal() {
   const metrics = useMemo(() => {
     const float = transactions.filter(t => t.status === 'FUNDED').reduce((acc, t) => acc + (Number(t.base_amount) || 0), 0);
     const revenue = transactions.filter(t => t.status === 'COMPLETED').reduce((acc, t) => {
-      const feeMultiplier = (t.applied_fee_percentage ?? 2.5) / 100;
+      const feeMultiplier = (t.applied_fee_percentage ?? 1.5) / 100;
       const totalFee = Math.round((Number(t.base_amount) || 0) * feeMultiplier);
       return acc + totalFee;
     }, 0);
@@ -282,11 +282,14 @@ export default function AdminPortal() {
 
   const calculateEconomics = (tx) => {
     const gross = Number(tx.base_amount) || 0;
-    const feePct = tx.applied_fee_percentage ?? 2.5;
-    const totalFee = Math.round(gross * (feePct / 100));
+    const feePct = tx.applied_fee_percentage ?? 1.5;
+    const totalFee = parseFloat((gross * feePct / 100).toFixed(2));
+    const feeResp = tx.fee_responsibility || 'SELLER';
+    const buyerFeeContrib = feeResp === 'BUYER' ? totalFee : feeResp === 'SPLIT' ? parseFloat((totalFee / 2).toFixed(2)) : 0;
+    const depositAmount = parseFloat((gross + buyerFeeContrib).toFixed(2));
     const secondaryAmount = Number(tx.secondary_vendor_amount) || 0;
-    const primaryNet = gross - totalFee - secondaryAmount;
-    return { gross, feePct, totalFee, secondaryAmount, primaryNet };
+    const primaryNet = parseFloat((depositAmount - totalFee - secondaryAmount).toFixed(2));
+    return { gross, feePct, totalFee, feeResp, depositAmount, secondaryAmount, primaryNet };
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#020617] text-white">Chargement...</div>;
@@ -388,7 +391,7 @@ export default function AdminPortal() {
             <div className="bg-blue-500/10 p-3 rounded-lg"><DollarSign className="w-6 h-6 text-blue-500" /></div>
           </div>
           <div className="bg-[#0b141a] border border-white/10 p-6 rounded-xl flex items-center justify-between">
-            <div><p className="text-sm text-gray-400">Revenus Générés (2.5%)</p><p className="text-2xl font-bold text-emerald-400">${metrics.revenue.toFixed(2)}</p></div>
+            <div><p className="text-sm text-gray-400">Revenus Générés (1.5%)</p><p className="text-2xl font-bold text-emerald-400">${metrics.revenue.toFixed(2)}</p></div>
             <div className="bg-emerald-500/10 p-3 rounded-lg"><Activity className="w-6 h-6 text-emerald-500" /></div>
           </div>
           <div className="bg-[#0b141a] border border-white/10 p-6 rounded-xl flex items-center justify-between">
@@ -628,12 +631,18 @@ export default function AdminPortal() {
                     {/* Breakdown Visualizer */}
                     <div className="bg-[#202c33] rounded-lg border border-white/5 overflow-hidden">
                       <div className="p-4 bg-white/5 flex justify-between items-center border-b border-white/5">
-                        <span className="text-sm font-semibold text-white">Montant Brut (Payé par l'Acheteur)</span>
-                        <span className="text-lg font-bold text-white">{eco.gross} {selectedTx.currency}</span>
+                        <div>
+                          <span className="text-sm font-semibold text-white">Montant Payé en Escrow (Acheteur)</span>
+                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full border font-bold uppercase
+                            bg-purple-500/10 text-purple-400 border-purple-500/20">
+                            Frais : {eco.feeResp === 'BUYER' ? 'Acheteur' : eco.feeResp === 'SPLIT' ? '50/50' : 'Vendeur'}
+                          </span>
+                        </div>
+                        <span className="text-lg font-bold text-white">{eco.depositAmount} {selectedTx.currency}</span>
                       </div>
                       <div className="p-4 grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/5">
                         <div className="p-4 flex flex-col justify-center">
-                          <span className="text-xs text-emerald-400 mb-1">Revenus Clairtus ({eco.feePct}%)</span>
+                          <span className="text-xs text-emerald-400 mb-1">Revenus Clairtus ({eco.feePct}% sur {eco.gross})</span>
                           <span className="text-xl font-mono text-emerald-500">+{eco.totalFee} {selectedTx.currency}</span>
                         </div>
                         {selectedTx.secondary_vendor_phone ? (

@@ -3,7 +3,7 @@ import { getSupabaseClient } from "../_shared/supabaseClient.ts";
 import { sendWhatsAppText, sendWhatsAppButtons } from "../_shared/whatsappClient.ts";
 import { MESSAGES } from "../_shared/whatsappMessaging.ts";
 import { notifyAdmin } from "../_shared/adminAlerts.ts";
-import { getNetworkInfo } from "../_shared/stateMachine.ts";
+import { getNetworkInfo, getDepositAmount } from "../_shared/stateMachine.ts";
 
 function getNetworkName(phone: string) {
     const clean = phone.replace(/\+/g, '').replace(/\s/g, '');
@@ -54,10 +54,14 @@ Deno.serve(async (req: Request) => {
 
                 if (updateError || !updatedTx) return new Response("Internal Database Error", { status: 500 });
 
+                const feePct = tx.applied_fee_percentage ?? 1.5;
+                const depositAmt = getDepositAmount(tx.base_amount, feePct, tx.fee_responsibility);
+                const sellerNetOnDeposit = parseFloat((depositAmt - Math.round(tx.base_amount * feePct / 100)).toFixed(2));
+
                 await supabase.from("sessions").update({ current_state: "AWAITING_DELIVERY_BUYER" }).eq("phone_number", tx.buyer_phone);
-                await sendWhatsAppText(tx.buyer_phone, MESSAGES.PAYMENT_SUCCESS_BUYER(tx.base_amount, tx.currency, generatedPin));
+                await sendWhatsAppText(tx.buyer_phone, MESSAGES.PAYMENT_SUCCESS_BUYER(depositAmt, tx.currency, generatedPin));
                 await supabase.from("sessions").update({ current_state: "AWAITING_DELIVERY_SELLER" }).eq("phone_number", tx.seller_phone);
-                await sendWhatsAppText(tx.seller_phone, MESSAGES.PAYMENT_SUCCESS_SELLER(tx.base_amount, tx.currency));
+                await sendWhatsAppText(tx.seller_phone, MESSAGES.PAYMENT_SUCCESS_SELLER(tx.base_amount, sellerNetOnDeposit, tx.currency));
                 
                 await notifyAdmin("SUCCESS_DEPOSIT", `Un dépôt de ${tx.base_amount} ${tx.currency} a été sécurisé !`, tx.buyer_phone, tx.id);
                 
@@ -124,7 +128,8 @@ Deno.serve(async (req: Request) => {
                 if (tx.status === "REFUNDED") return new Response("Already Processed", { status: 200 });
                 if (status === "COMPLETED") {
                     await supabase.from("transactions").update({ status: "REFUNDED" }).eq("id", tx.id);
-                    await notifyAdmin("SUCCESS_PAYOUT", `Remboursement confirmé pour TX ${tx.reference}. ${tx.base_amount} ${tx.currency} retournés à l'acheteur (+${tx.buyer_phone}).`, tx.buyer_phone, tx.id);
+                    const refundedAmt = getDepositAmount(tx.base_amount, tx.applied_fee_percentage ?? 1.5, tx.fee_responsibility);
+                    await notifyAdmin("SUCCESS_PAYOUT", `Remboursement confirmé pour TX ${tx.reference}. ${refundedAmt} ${tx.currency} retournés à l'acheteur (+${tx.buyer_phone}).`, tx.buyer_phone, tx.id);
                 }
                 return new Response("Refund Webhook Processed", { status: 200 });
             }
@@ -170,10 +175,11 @@ Deno.serve(async (req: Request) => {
                 await supabase.from("transactions").update({ status: "COMPLETED" }).eq("id", tx.id);
 
                 // Re-calculate the Net Fees for the Transparency Receipt
-                const feePercentage = tx.applied_fee_percentage ?? 2.5; 
+                const feePercentage = tx.applied_fee_percentage ?? 1.5;
                 const feeMultiplier = feePercentage / 100;
+                const depositAmtPayout = getDepositAmount(tx.base_amount, feePercentage, tx.fee_responsibility);
                 let secondaryGross = tx.secondary_vendor_amount ? Number(tx.secondary_vendor_amount) : 0;
-                let primaryGross = tx.base_amount - secondaryGross;
+                let primaryGross = depositAmtPayout - secondaryGross;
 
                 const secondaryFee = Math.round(secondaryGross * feeMultiplier);
                 const totalFee = Math.round(tx.base_amount * feeMultiplier);
