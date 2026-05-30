@@ -480,7 +480,7 @@ export async function processMessage(phone: string, text: string) {
                 const { data: currentTx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
                 // 🛡️ COMPLIANCE: HARD FINANCIAL CAP INTERCEPTOR
-                const limitAmount = currentTx.currency === "USD" ? 300 : 850000;
+                const limitAmount = currentTx.currency === "USD" ? 500 : 1415000;
                 if (priceSell > limitAmount && user.kyc_status !== "VERIFIED") {
                     await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
                     return await sendWhatsAppText(phone, `🚨 *Limite de Sécurité*\n\nVotre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction.\n\nPour débloquer les transactions illimitées, veuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.`);
@@ -544,7 +544,7 @@ export async function processMessage(phone: string, text: string) {
                 const { data: currentTx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
                 // 🛡️ COMPLIANCE: HARD FINANCIAL CAP INTERCEPTOR
-                const limitAmount = currentTx.currency === "USD" ? 300 : 850000;
+                const limitAmount = currentTx.currency === "USD" ? 500 : 1415000;
                 if (priceBuy > limitAmount && user.kyc_status !== "VERIFIED") {
                     await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
                     return await sendWhatsAppText(phone, `🚨 *Limite de Sécurité*\n\nVotre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction.\n\nPour débloquer les transactions illimitées, veuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.`);
@@ -1214,7 +1214,18 @@ export async function processMessage(phone: string, text: string) {
 // 🚀 HELPER: SELLER ACCEPTANCE & SPLIT PAYOUT INTERCEPTOR
 async function handleInviteAcceptance(phone: string, session: any, supabase: any) {
     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
-    
+
+    // 🛡️ COMPLIANCE: KYC GATE FOR THE COUNTERPARTY ON HIGH-VALUE TRANSACTIONS
+    // The initiating party was already checked at price entry. This covers the invited side.
+    const kycLimit = tx.currency === "USD" ? 500 : 1415000;
+    if (tx.base_amount > kycLimit) {
+        const { data: acceptingUser } = await supabase.from("users").select("kyc_status").eq("phone_number", phone).single();
+        if (acceptingUser?.kyc_status !== "VERIFIED") {
+            await supabase.from("sessions").update({ current_state: "AWAITING_ID_DOCUMENT" }).eq("phone_number", phone);
+            return await sendWhatsAppText(phone, `🚨 *Vérification d'Identité Requise*\n\nCette transaction dépasse *${kycLimit} ${tx.currency}*. Les deux parties doivent être vérifiées pour ce montant.\n\nVeuillez envoyer une *photo de votre pièce d'identité* (Carte d'électeur ou Passeport) ici dans le chat.\n\nUne fois votre compte vérifié, tapez *BONJOUR* pour reprendre cette transaction.`);
+        }
+    }
+
     if (tx.seller_phone === phone) {
         await supabase.from("sessions").update({ current_state: "AWAITING_SPLIT_CHOICE_INVITED" }).eq("phone_number", phone);
         await sendWhatsAppButtons(phone, MESSAGES.ASK_SPLIT_CHOICE, [
