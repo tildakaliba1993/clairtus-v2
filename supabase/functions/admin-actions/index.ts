@@ -98,13 +98,19 @@ Deno.serve(async (req: Request) => {
 
             await Promise.allSettled(payoutPromises);
 
-            await sendWhatsAppText(tx.seller_phone, `✅ *Fonds en cours de libération*\n\nSuite à l'examen de votre dossier, Clairtus a validé la transaction ${tx.reference}. Votre paiement est en cours de traitement vers votre compte.`);
-            
+            const kycBase    = Deno.env.get("KYC_BASE_URL") ?? "https://clairtus.com";
+            const receiptUrl = `${kycBase}/receipt/${tx.id}`;
+
+            await sendWhatsAppText(tx.seller_phone,
+                `✅ *Fonds en cours de libération*\n\nSuite à l'examen de votre dossier, Clairtus a validé la transaction ${tx.reference}.\n\n🧾 *Votre Reçu Légal :*\n${receiptUrl}`);
+
             if (tx.secondary_vendor_phone) {
-                await sendWhatsAppText(tx.secondary_vendor_phone, `✅ *Fonds en cours de libération*\n\nClairtus a validé une transaction incluant votre part. Votre paiement est en cours de traitement.`);
+                await sendWhatsAppText(tx.secondary_vendor_phone,
+                    `✅ *Fonds en cours de libération*\n\nClairtus a validé une transaction incluant votre part. Votre paiement est en cours de traitement.`);
             }
 
-            await sendWhatsAppText(tx.buyer_phone, `⚖️ *Décision Arbitrage*\n\nLa transaction ${tx.reference} a été clôturée par un administrateur. Les paiements ont été initiés.`);
+            await sendWhatsAppText(tx.buyer_phone,
+                `⚖️ *Décision Arbitrage*\n\nLa transaction ${tx.reference} a été clôturée par un administrateur.\n\n🧾 *Votre Reçu Légal :*\n${receiptUrl}`);
 
             return new Response(JSON.stringify({ success: true, message: "Payouts initiated successfully" }), { 
                 status: 200, 
