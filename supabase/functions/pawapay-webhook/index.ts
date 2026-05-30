@@ -37,6 +37,7 @@ Deno.serve(async (req: Request) => {
                 console.warn(`🧟 [ZOMBIE PAYMENT] Payment arrived for CANCELLED transaction ${tx.reference}. Moving to DISPUTED.`);
                 const { error: zombieError } = await supabase.from("transactions").update({ status: "DISPUTED" }).eq("id", tx.id);
                 if (zombieError) return new Response("Internal Error", { status: 500 });
+                await notifyAdmin("DISPUTE", `💀 Paiement zombie sur TX ${tx.reference}. Un paiement de ${tx.base_amount} ${tx.currency} est arrivé pour une transaction ANNULÉE. Fonds mis en LITIGE — intervention requise.`, tx.buyer_phone, tx.id);
                 return new Response("Zombie Payment Flagged", { status: 200 });
             }
 
@@ -123,6 +124,7 @@ Deno.serve(async (req: Request) => {
                 if (tx.status === "REFUNDED") return new Response("Already Processed", { status: 200 });
                 if (status === "COMPLETED") {
                     await supabase.from("transactions").update({ status: "REFUNDED" }).eq("id", tx.id);
+                    await notifyAdmin("SUCCESS_PAYOUT", `Remboursement confirmé pour TX ${tx.reference}. ${tx.base_amount} ${tx.currency} retournés à l'acheteur (+${tx.buyer_phone}).`, tx.buyer_phone, tx.id);
                 }
                 return new Response("Refund Webhook Processed", { status: 200 });
             }
@@ -205,6 +207,7 @@ Deno.serve(async (req: Request) => {
             } else if (isPartiallySettled) {
                 console.warn(`⚠️ [PARTIAL PAYOUT] TX ${tx.reference} is partially settled. Awaiting CRON retry.`);
                 await supabase.from("transactions").update({ status: "PARTIAL_PAYOUT" }).eq("id", tx.id);
+                await notifyAdmin("PAYOUT_FAILED", `Paiement partiel sur TX ${tx.reference} (${tx.base_amount} ${tx.currency}). L'une des deux jambes du split a échoué. Vérifiez les IDs primary/secondary dans le portail.`, tx.seller_phone, tx.id);
                 // System logs it and waits for self-healing CRON to retry the failed leg
                 
             } else if (isFullyFailed) {
