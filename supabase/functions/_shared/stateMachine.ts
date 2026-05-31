@@ -693,13 +693,6 @@ export async function processMessage(phone: string, text: string) {
                 const boundsErrorSell = checkAmountBounds(priceSell, currentTx.currency, rateSell);
                 if (boundsErrorSell) return await sendWhatsAppText(phone, boundsErrorSell);
 
-                // 🛡️ COMPLIANCE: KYC THRESHOLD — only reachable if a higher BCC authorization is
-                // configured via env (otherwise the per-transaction cap above already blocks > daily max).
-                const limitAmount = fromUsd(getBccDailyMaxUsd(), currentTx.currency, rateSell);
-                if (priceSell > limitAmount && user.kyc_status !== "VERIFIED") {
-                    return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount.toLocaleString('fr-FR')} ${currentTx.currency}* par transaction non vérifiée.`);
-                }
-
                 await supabase.from("transactions").update({ base_amount: priceSell }).eq("id", session.draft_transaction_id);
                 const feePctSell = currentTx.applied_fee_percentage ?? 1.5;
                 if (feePctSell === 0) {
@@ -779,13 +772,6 @@ export async function processMessage(phone: string, text: string) {
                 // check still runs in finalizeContractAndPromptPayment before any deposit.
                 const buyEarlyBcc = await checkBuyerBccLimits(supabase, phone, priceBuy, currentTx.currency, session.draft_transaction_id, rateBuy);
                 if (buyEarlyBcc) return await sendWhatsAppText(phone, buyEarlyBcc);
-
-                // 🛡️ COMPLIANCE: KYC THRESHOLD — only reachable if a higher BCC authorization is
-                // configured via env (otherwise the per-transaction cap above already blocks > daily max).
-                const limitAmount = fromUsd(getBccDailyMaxUsd(), currentTx.currency, rateBuy);
-                if (priceBuy > limitAmount && user.kyc_status !== "VERIFIED") {
-                    return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount.toLocaleString('fr-FR')} ${currentTx.currency}* par transaction non vérifiée.`);
-                }
 
                 await supabase.from("transactions").update({ base_amount: priceBuy }).eq("id", session.draft_transaction_id);
                 const feePctBuy = currentTx.applied_fee_percentage ?? 1.5;
@@ -1458,18 +1444,14 @@ export async function processMessage(phone: string, text: string) {
 async function handleInviteAcceptance(phone: string, session: any, supabase: any) {
     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
-    // Fetch accepting user once — used for both KYC check and promo check below.
+    // Fetch the accepting user once — used by the promo check below.
+    // Note: no amount-based KYC gate here. Baseline identity is handled by the MNO at
+    // wallet registration; transactions are hard-capped at the BCC limit, so there is no
+    // "high-value" tier to gate. Enhanced ID verification (Smile ID) is triggered only on
+    // the structuring/ping-pong signal in the price-entry handlers.
     const { data: acceptingUser } = await supabase.from("users")
         .select("kyc_status, promo_code_applied")
         .eq("phone_number", phone).single();
-
-    // 🛡️ COMPLIANCE: KYC GATE FOR THE COUNTERPARTY ON HIGH-VALUE TRANSACTIONS
-    const kycLimit = tx.currency === "USD" ? 500 : 1415000;
-    if (tx.base_amount > kycLimit) {
-        if (acceptingUser?.kyc_status !== "VERIFIED") {
-            return await sendKYCVerificationLink(phone, supabase, `Cette transaction dépasse *${kycLimit} ${tx.currency}*. Les deux parties doivent être vérifiées pour ce montant.`);
-        }
-    }
 
     // 🎫 PROMO CHECK: If the accepting party has a promo code better than the current fee, apply it.
     // This covers the case where the initiator didn't have a promo but the counterparty does.
