@@ -33,6 +33,15 @@ export const MESSAGES = {
 
   AMOUNT_INVALID_FORMAT: `❌ Format du prix invalide.\n\nEnvoyez uniquement des chiffres.\nExemple : 150 ou 150.50`,
 
+  AMOUNT_TOO_LOW: (min: number, currency: string) =>
+    `❌ *Montant trop faible.*\n\nLe montant minimum par transaction est de *${min.toLocaleString('fr-FR')} ${currency}*.\n\nVeuillez entrer un montant plus élevé.`,
+  AMOUNT_TOO_HIGH: (max: number, currency: string) =>
+    `🚫 *Montant trop élevé.*\n\nLa Banque Centrale du Congo (BCC) limite chaque paiement Mobile Money à *${max.toLocaleString('fr-FR')} ${currency}* maximum.\n\nPour une transaction plus importante, vous pouvez la répartir sur plusieurs jours. Veuillez entrer un montant inférieur ou égal à *${max.toLocaleString('fr-FR')} ${currency}*.`,
+  BCC_DAILY_LIMIT: (remaining: number, currency: string) =>
+    `🏦 *Plafond journalier atteint*\n\nPour respecter la réglementation de la Banque Centrale du Congo (BCC), les paiements sont limités à *500 USD par jour* (ou l'équivalent en CDF).\n\n💡 Il vous reste *${remaining.toLocaleString('fr-FR')} ${currency}* aujourd'hui. Vous pourrez effectuer le reste demain, ou réduire le montant de cette transaction.`,
+  BCC_MONTHLY_LIMIT: (remaining: number, currency: string) =>
+    `🏦 *Plafond mensuel atteint*\n\nPour respecter la réglementation de la Banque Centrale du Congo (BCC), les paiements sont limités à *2 500 USD sur 30 jours* (ou l'équivalent en CDF).\n\n💡 Il vous reste *${remaining.toLocaleString('fr-FR')} ${currency}* ce mois-ci. Votre plafond se reconstitue progressivement. Vous pouvez réduire le montant ou réessayer plus tard.`,
+
   COUNTERPARTY_PHONE_REQUEST_SELL: (amount: number, currency: string) =>
     `💰 Prix : ${amount} ${currency}\n\nQuel est le numéro WhatsApp ou Mobile Money de l'ACHETEUR ?\n(Format international obligatoire, ex: +243810000000)\n\n⚠️ *Important : L'acheteur doit utiliser M-Pesa ou Orange. Les dépôts Airtel sont temporairement suspendus pour garantir des paiements instantanés.*`,
   COUNTERPARTY_PHONE_REQUEST_BUY: (amount: number, currency: string) =>

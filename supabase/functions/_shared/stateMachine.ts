@@ -30,6 +30,91 @@ async function sendKYCVerificationLink(phone: string, supabase: any, reason: str
     await sendWhatsAppText(phone, msg);
 }
 
+// ─── BCC (Banque Centrale du Congo) regulatory limits ───────────────────────────
+// Source: Instruction n°24 (2011), Article 17 — the PERMANENT law. The higher COVID
+// figures in Instruction n°43 (USD 7,500 / 2,500 daily) expired end of Dec 2020 (Art. 11).
+//   • Per-day payments  ≤ USD 500   • Per-month payments ≤ USD 2,500   • Wallet ≤ USD 3,000
+// These ceilings apply to the PAYER (the e-money "porteur"). In Clairtus that is the
+// BUYER, whose deposit is an outgoing e-money payment. Sellers/secondary vendors only
+// RECEIVE funds; the USD 3,000 wallet-balance cap that governs receivers is enforced
+// upstream by the MNO/PawaPay (we cannot observe a wallet balance), and any single
+// payout here is < 500, far below 3,000.
+//
+// Raisable ONLY by express BCC authorization. If you obtain it, override via env:
+//   BCC_MAX_USD (per-transaction & daily) / BCC_MONTHLY_MAX_USD (monthly).
+const USD_RATE_CDF = 2830; // 1 USD ≈ 2,830 CDF (matches 500 USD = 1,415,000 CDF)
+
+const MIN_AMOUNT: Record<string, number> = { USD: 1, CDF: USD_RATE_CDF };
+
+function getBccDailyMaxUsd(): number {
+    const n = parseFloat(Deno.env.get("BCC_MAX_USD") ?? "");
+    return isNaN(n) ? 500 : n;
+}
+function getBccMonthlyMaxUsd(): number {
+    const n = parseFloat(Deno.env.get("BCC_MONTHLY_MAX_USD") ?? "");
+    return isNaN(n) ? 2500 : n;
+}
+function toUsd(amount: number, currency: string): number {
+    return currency === "CDF" ? amount / USD_RATE_CDF : amount;
+}
+function fromUsd(amountUsd: number, currency: string): number {
+    return currency === "CDF" ? Math.floor(amountUsd * USD_RATE_CDF) : parseFloat(amountUsd.toFixed(2));
+}
+
+// Per-transaction bounds: minimum floor + BCC daily ceiling (a single payment cannot
+// exceed the daily cap). Returns a localized error message, or null if valid.
+function checkAmountBounds(amount: number, currency: string): string | null {
+    const min = MIN_AMOUNT[currency] ?? 1;
+    if (amount < min) return MESSAGES.AMOUNT_TOO_LOW(min, currency);
+
+    const maxInCurrency = fromUsd(getBccDailyMaxUsd(), currency);
+    if (amount > maxInCurrency) return MESSAGES.AMOUNT_TOO_HIGH(maxInCurrency, currency);
+
+    return null;
+}
+
+// Sums a buyer's committed payment volume (USD-equivalent) since `sinceIso`, excluding the
+// in-flight transaction itself. Counts every status where the buyer's payment is committed
+// or in-flight, so concurrent setups cannot collectively breach the ceiling.
+async function sumBuyerVolumeUsd(supabase: any, buyerPhone: string, sinceIso: string, excludeTxId: string | null): Promise<number> {
+    const { data } = await supabase.from("transactions")
+        .select("id, base_amount, currency, applied_fee_percentage, fee_responsibility, status, created_at")
+        .eq("buyer_phone", buyerPhone)
+        .gte("created_at", sinceIso)
+        .in("status", ["PENDING_FUNDING", "FUNDED", "PROCESSING_PAYOUTS", "PARTIAL_PAYOUT", "COMPLETED", "PAYOUT_FAILED"]);
+    if (!data) return 0;
+    let sumUsd = 0;
+    for (const t of data) {
+        if (excludeTxId && t.id === excludeTxId) continue;
+        const dep = getDepositAmount(t.base_amount, t.applied_fee_percentage ?? 1.5, t.fee_responsibility);
+        sumUsd += toUsd(dep, t.currency);
+    }
+    return sumUsd;
+}
+
+// Enforces the BCC daily (24h) and monthly (30d) PAYMENT ceilings against the BUYER.
+// Returns a graceful French block message, or null if the deposit is within limits.
+async function checkBuyerBccLimits(supabase: any, buyerPhone: string, depositAmount: number, currency: string, currentTxId: string | null): Promise<string | null> {
+    const newUsd   = toUsd(depositAmount, currency);
+    const now      = Date.now();
+    const dayAgo   = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const monthAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const dailyUsd = await sumBuyerVolumeUsd(supabase, buyerPhone, dayAgo, currentTxId);
+    if (dailyUsd + newUsd > getBccDailyMaxUsd() + 0.01) {
+        const remaining = fromUsd(Math.max(0, getBccDailyMaxUsd() - dailyUsd), currency);
+        return MESSAGES.BCC_DAILY_LIMIT(remaining, currency);
+    }
+
+    const monthlyUsd = await sumBuyerVolumeUsd(supabase, buyerPhone, monthAgo, currentTxId);
+    if (monthlyUsd + newUsd > getBccMonthlyMaxUsd() + 0.01) {
+        const remaining = fromUsd(Math.max(0, getBccMonthlyMaxUsd() - monthlyUsd), currency);
+        return MESSAGES.BCC_MONTHLY_LIMIT(remaining, currency);
+    }
+
+    return null;
+}
+
 // Computes the actual deposit amount the buyer pays based on who covers the escrow fee.
 export function getDepositAmount(base: number, feePct: number, feeResp?: string | null): number {
     const fee = base * feePct / 100;
@@ -570,7 +655,7 @@ export async function processMessage(phone: string, text: string) {
                 } else {
                     const { data: txFee } = await supabase.from("transactions").select("base_amount, currency").eq("id", session.draft_transaction_id).single();
                     await supabase.from("sessions").update({ current_state: "AWAITING_COUNTERPARTY_PHONE_BUY" }).eq("phone_number", phone);
-                    await sendWhatsAppText(phone, MESSAGES.COUNTERPARTY_PHONE_REQUEST_BUY(txFee.base_amount, txFee.currency));
+                    await sendWhatsAppText(phone, MESSAGES.COUNTERPARTY_PHONE_REQUEST_BUY(txFee?.base_amount, txFee?.currency));
                 }
                 break;
             }
@@ -579,10 +664,14 @@ export async function processMessage(phone: string, text: string) {
             case "AWAITING_PRICE_SELL": {
                 const priceSell = parseFloat(cleanText.replace(',', '.'));
                 if (isNaN(priceSell) || priceSell <= 0) return await sendWhatsAppText(phone, MESSAGES.AMOUNT_INVALID_FORMAT);
-                
+
                 const { data: currentTx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
-                // 🛡️ COMPLIANCE: HARD FINANCIAL CAP INTERCEPTOR
+                // 🏦 MIN FLOOR + BCC MAX CEILING (applies to all users)
+                const boundsErrorSell = checkAmountBounds(priceSell, currentTx.currency);
+                if (boundsErrorSell) return await sendWhatsAppText(phone, boundsErrorSell);
+
+                // 🛡️ COMPLIANCE: KYC THRESHOLD (unverified users only)
                 const limitAmount = currentTx.currency === "USD" ? 500 : 1415000;
                 if (priceSell > limitAmount && user.kyc_status !== "VERIFIED") {
                     return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction non vérifiée.`);
@@ -654,10 +743,21 @@ export async function processMessage(phone: string, text: string) {
             case "AWAITING_PRICE_BUY": {
                 const priceBuy = parseFloat(cleanText.replace(',', '.'));
                 if (isNaN(priceBuy) || priceBuy <= 0) return await sendWhatsAppText(phone, MESSAGES.AMOUNT_INVALID_FORMAT);
-                
+
                 const { data: currentTx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
-                // 🛡️ COMPLIANCE: HARD FINANCIAL CAP INTERCEPTOR
+                // 🏦 MIN FLOOR + BCC PER-TRANSACTION CEILING (applies to all users)
+                const boundsErrorBuy = checkAmountBounds(priceBuy, currentTx.currency);
+                if (boundsErrorBuy) return await sendWhatsAppText(phone, boundsErrorBuy);
+
+                // 🏦 BCC daily/monthly check (early UX — in the BUY flow the buyer is the initiator,
+                // so we can warn them now rather than after a counterparty accepts). The authoritative
+                // check still runs in finalizeContractAndPromptPayment before any deposit.
+                const buyEarlyBcc = await checkBuyerBccLimits(supabase, phone, priceBuy, currentTx.currency, session.draft_transaction_id);
+                if (buyEarlyBcc) return await sendWhatsAppText(phone, buyEarlyBcc);
+
+                // 🛡️ COMPLIANCE: KYC THRESHOLD — only reachable if a higher BCC authorization is
+                // configured via env (otherwise the per-transaction cap above already blocks > daily max).
                 const limitAmount = currentTx.currency === "USD" ? 500 : 1415000;
                 if (priceBuy > limitAmount && user.kyc_status !== "VERIFIED") {
                     return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount} ${currentTx.currency}* par transaction non vérifiée.`);
@@ -1425,9 +1525,26 @@ async function finalizeContractAndPromptPayment(acceptingPhone: string, session:
         }
     }
 
+    // 🏦 BCC COMPLIANCE: enforce the buyer's daily/monthly payment ceilings before any deposit.
+    // This is the single choke point every payment path flows through, so it guarantees no
+    // transaction can breach BCC Art.17 limits. Uses the actual deposit (base + buyer's fee share).
+    const bccDeposit = getDepositAmount(tx.base_amount, tx.applied_fee_percentage ?? 1.5, tx.fee_responsibility);
+    const bccBlock = await checkBuyerBccLimits(supabase, tx.buyer_phone, bccDeposit, tx.currency, tx.id);
+    if (bccBlock) {
+        // Roll the contract back to a clean state and inform both parties gracefully.
+        await supabase.from("transactions").update({ status: "CANCELLED" }).eq("id", tx.id);
+        await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", tx.buyer_phone);
+        await supabase.from("sessions").update({ current_state: "MAIN_MENU", draft_transaction_id: null }).eq("phone_number", tx.seller_phone);
+        await sendWhatsAppText(tx.buyer_phone, bccBlock);
+        if (tx.seller_phone && tx.seller_phone !== tx.buyer_phone) {
+            await sendWhatsAppText(tx.seller_phone, `ℹ️ La transaction *${tx.reference}* n'a pas pu être finalisée : l'acheteur a atteint le plafond réglementaire BCC. Il pourra la reprendre prochainement.`);
+        }
+        return; // 🛑 Do not prompt payment.
+    }
+
     // --- PROCEED WITH NORMAL PAYMENT FLOW ---
     await supabase.from("transactions").update({ status: "PENDING_FUNDING", payment_attempts: 0 }).eq("id", tx.id);
-    
+
     const isAcceptingUserTheBuyer = acceptingPhone === tx.buyer_phone;
     const buyerPhone = tx.buyer_phone;
     
