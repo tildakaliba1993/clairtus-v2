@@ -102,3 +102,11 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/smile-id-callback/deno.json"
 entrypoint = "./functions/smile-id-callback/index.ts"
+
+[functions.fx-rate-updater]
+enabled = true
+# Invoked by the internal daily cron — false keeps it reachable regardless of how
+# the scheduler attaches (it has no external caller and writes only the fx cache).
+verify_jwt = false
+import_map = "./functions/fx-rate-updater/deno.json"
+entrypoint = "./functions/fx-rate-updater/index.ts"
