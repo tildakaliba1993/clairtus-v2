@@ -5,7 +5,7 @@ import { MESSAGES } from "./whatsappMessaging.ts";
 import { initiatePawaPayPayout, initiatePawaPayDeposit } from "./pawapayClient.ts";
 import { notifyAdmin } from "./adminAlerts.ts";
 
-const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 1.5% de frais d'escrow, répartis selon l'accord entre les parties.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n\n🔗 *Conditions & Confidentialité :* https://clairtus.com\n\nEn continuant, vous acceptez ces conditions.";
+const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 1.5% de frais d'escrow, répartis selon l'accord entre les parties.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n4️⃣ Conformément à la Banque Centrale du Congo (BCC) : maximum *500 USD par transaction et par jour*, et *2 500 USD par mois* (équivalents en CDF au taux du jour).\n\n🔗 *Conditions & Confidentialité :* https://clairtus.com\n\nEn continuant, vous acceptez ces conditions.";
 
 // Builds the personalized Smile ID verification URL for a user.
 function buildKYCLink(phone: string): string {
@@ -113,27 +113,70 @@ async function sumBuyerVolumeUsd(supabase: any, buyerPhone: string, sinceIso: st
     return sumUsd;
 }
 
+// Returns the buyer's remaining daily and monthly headroom (USD), given current usage.
+async function getBuyerRemainingUsd(supabase: any, buyerPhone: string, rate: number): Promise<{ dailyUsd: number; monthlyUsd: number }> {
+    const now      = Date.now();
+    const dayAgo   = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+    const monthAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const dailyUsed   = await sumBuyerVolumeUsd(supabase, buyerPhone, dayAgo, null, rate);
+    const monthlyUsed = await sumBuyerVolumeUsd(supabase, buyerPhone, monthAgo, null, rate);
+    return {
+        dailyUsd:   Math.max(0, getBccDailyMaxUsd() - dailyUsed),
+        monthlyUsd: Math.max(0, getBccMonthlyMaxUsd() - monthlyUsed),
+    };
+}
+
 // Enforces the BCC daily (24h) and monthly (30d) PAYMENT ceilings against the BUYER.
-// Returns a graceful French block message, or null if the deposit is within limits.
+// Returns a graceful French block message (showing remaining headroom), or null if within limits.
 async function checkBuyerBccLimits(supabase: any, buyerPhone: string, depositAmount: number, currency: string, currentTxId: string | null, rate: number): Promise<string | null> {
     const newUsd   = toUsd(depositAmount, currency, rate);
     const now      = Date.now();
     const dayAgo   = new Date(now - 24 * 60 * 60 * 1000).toISOString();
     const monthAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    const dailyUsd = await sumBuyerVolumeUsd(supabase, buyerPhone, dayAgo, currentTxId, rate);
-    if (dailyUsd + newUsd > getBccDailyMaxUsd() + 0.01) {
-        const remaining = fromUsd(Math.max(0, getBccDailyMaxUsd() - dailyUsd), currency, rate);
-        return MESSAGES.BCC_DAILY_LIMIT(remaining, currency);
-    }
-
+    const dailyUsd   = await sumBuyerVolumeUsd(supabase, buyerPhone, dayAgo, currentTxId, rate);
     const monthlyUsd = await sumBuyerVolumeUsd(supabase, buyerPhone, monthAgo, currentTxId, rate);
-    if (monthlyUsd + newUsd > getBccMonthlyMaxUsd() + 0.01) {
-        const remaining = fromUsd(Math.max(0, getBccMonthlyMaxUsd() - monthlyUsd), currency, rate);
-        return MESSAGES.BCC_MONTHLY_LIMIT(remaining, currency);
-    }
 
+    const dailyRem   = fromUsd(Math.max(0, getBccDailyMaxUsd() - dailyUsd), currency, rate);
+    const monthlyRem = fromUsd(Math.max(0, getBccMonthlyMaxUsd() - monthlyUsd), currency, rate);
+
+    if (dailyUsd + newUsd > getBccDailyMaxUsd() + 0.01) {
+        return MESSAGES.BCC_DAILY_LIMIT(dailyRem, monthlyRem, currency);
+    }
+    if (monthlyUsd + newUsd > getBccMonthlyMaxUsd() + 0.01) {
+        return MESSAGES.BCC_MONTHLY_LIMIT(monthlyRem, currency);
+    }
     return null;
+}
+
+// ─── Limits-awareness copy builders (live rate + caps + remaining headroom) ──────
+
+// Short live-rate line, shown only for CDF transactions.
+function rateLine(currency: string, rate: number): string {
+    return currency === "CDF"
+        ? `\n💱 Taux du jour : 1 USD = ${Math.round(rate).toLocaleString('fr-FR')} CDF (actualisé chaque jour).`
+        : "";
+}
+
+// SELLER-facing limits note: per-transaction cap + wallet caveat + live rate (CDF).
+function sellerLimitsInfo(currency: string, rate: number): string {
+    const cap = fromUsd(getBccDailyMaxUsd(), currency, rate);
+    return `\n\n📋 *Limite par transaction (BCC) :* ${cap.toLocaleString('fr-FR')} ${currency} maximum.` +
+           `\nℹ️ Le montant que vous pouvez recevoir dépend aussi du plafond de votre portefeuille Mobile Money.` +
+           rateLine(currency, rate);
+}
+
+// BUYER-facing limits note: per-transaction cap + remaining daily/monthly + live rate (CDF).
+async function buyerLimitsInfo(supabase: any, buyerPhone: string, currency: string, rate: number): Promise<string> {
+    const cap = fromUsd(getBccDailyMaxUsd(), currency, rate);
+    const { dailyUsd, monthlyUsd } = await getBuyerRemainingUsd(supabase, buyerPhone, rate);
+    const dailyRem   = fromUsd(dailyUsd, currency, rate);
+    const monthlyRem = fromUsd(monthlyUsd, currency, rate);
+    return `\n\n📋 *Vos limites (BCC) :*` +
+           `\n• Max par transaction : ${cap.toLocaleString('fr-FR')} ${currency}` +
+           `\n• Restant aujourd'hui : ${dailyRem.toLocaleString('fr-FR')} ${currency}` +
+           `\n• Restant ce mois-ci : ${monthlyRem.toLocaleString('fr-FR')} ${currency}` +
+           rateLine(currency, rate);
 }
 
 // Computes the actual deposit amount the buyer pays based on who covers the escrow fee.
@@ -527,7 +570,11 @@ export async function processMessage(phone: string, text: string) {
                         await sendWhatsAppButtons(phone, `🔄 *Reprise de la transaction :*\n${itemTitle}\n\n` + MESSAGES.CURRENCY_REQUEST, [{ id: "CMD_CURR_USD", title: "USD ($)" }, { id: "CMD_CURR_CDF", title: "CDF (Francs)" }]);
                     } else if (!tx.base_amount) {
                         await supabase.from("sessions").update({ current_state: isSeller ? "AWAITING_PRICE_SELL" : "AWAITING_PRICE_BUY" }).eq("phone_number", phone);
-                        await sendWhatsAppText(phone, `🔄 *Reprise de la transaction :*\n${itemTitle}\n\n` + (isSeller ? MESSAGES.PRICE_REQUEST_SELL(itemTitle, tx.currency) : MESSAGES.PRICE_REQUEST_BUY(itemTitle, tx.currency)));
+                        const rateResume = await getUsdCdfRate(supabase);
+                        const resumePrompt = isSeller
+                            ? MESSAGES.PRICE_REQUEST_SELL(itemTitle, tx.currency, sellerLimitsInfo(tx.currency, rateResume))
+                            : MESSAGES.PRICE_REQUEST_BUY(itemTitle, tx.currency, await buyerLimitsInfo(supabase, phone, tx.currency, rateResume));
+                        await sendWhatsAppText(phone, `🔄 *Reprise de la transaction :*\n${itemTitle}\n\n` + resumePrompt);
                     } else if (!tx.fee_responsibility) {
                         const resumeFeePct = tx.applied_fee_percentage ?? 1.5;
                         if (resumeFeePct === 0) {
@@ -633,7 +680,8 @@ export async function processMessage(phone: string, text: string) {
                     const selectedCurrency = cleanText === "CMD_CURR_USD" ? "USD" : "CDF";
                     const { data: tx } = await supabase.from("transactions").update({ currency: selectedCurrency }).eq("id", session.draft_transaction_id).select().single();
                     await supabase.from("sessions").update({ current_state: "AWAITING_PRICE_SELL" }).eq("phone_number", phone);
-                    await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_SELL(tx.item_description, selectedCurrency));
+                    const rateSellPrompt = await getUsdCdfRate(supabase);
+                    await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_SELL(tx.item_description, selectedCurrency, sellerLimitsInfo(selectedCurrency, rateSellPrompt)));
                 } else {
                     await sendWhatsAppText(phone, "⚠️ Veuillez utiliser les boutons pour sélectionner la devise.");
                 }
@@ -645,7 +693,8 @@ export async function processMessage(phone: string, text: string) {
                     const selectedCurrency = cleanText === "CMD_CURR_USD" ? "USD" : "CDF";
                     const { data: tx } = await supabase.from("transactions").update({ currency: selectedCurrency }).eq("id", session.draft_transaction_id).select().single();
                     await supabase.from("sessions").update({ current_state: "AWAITING_PRICE_BUY" }).eq("phone_number", phone);
-                    await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_BUY(tx.item_description, selectedCurrency));
+                    const rateBuyPrompt = await getUsdCdfRate(supabase);
+                    await sendWhatsAppText(phone, MESSAGES.PRICE_REQUEST_BUY(tx.item_description, selectedCurrency, await buyerLimitsInfo(supabase, phone, selectedCurrency, rateBuyPrompt)));
                 } else {
                     await sendWhatsAppText(phone, "⚠️ Veuillez utiliser les boutons pour sélectionner la devise.");
                 }
@@ -692,13 +741,6 @@ export async function processMessage(phone: string, text: string) {
                 // 🏦 MIN FLOOR + BCC PER-TRANSACTION CEILING (applies to all users)
                 const boundsErrorSell = checkAmountBounds(priceSell, currentTx.currency, rateSell);
                 if (boundsErrorSell) return await sendWhatsAppText(phone, boundsErrorSell);
-
-                // 🛡️ COMPLIANCE: KYC THRESHOLD — only reachable if a higher BCC authorization is
-                // configured via env (otherwise the per-transaction cap above already blocks > daily max).
-                const limitAmount = fromUsd(getBccDailyMaxUsd(), currentTx.currency, rateSell);
-                if (priceSell > limitAmount && user.kyc_status !== "VERIFIED") {
-                    return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount.toLocaleString('fr-FR')} ${currentTx.currency}* par transaction non vérifiée.`);
-                }
 
                 await supabase.from("transactions").update({ base_amount: priceSell }).eq("id", session.draft_transaction_id);
                 const feePctSell = currentTx.applied_fee_percentage ?? 1.5;
@@ -779,13 +821,6 @@ export async function processMessage(phone: string, text: string) {
                 // check still runs in finalizeContractAndPromptPayment before any deposit.
                 const buyEarlyBcc = await checkBuyerBccLimits(supabase, phone, priceBuy, currentTx.currency, session.draft_transaction_id, rateBuy);
                 if (buyEarlyBcc) return await sendWhatsAppText(phone, buyEarlyBcc);
-
-                // 🛡️ COMPLIANCE: KYC THRESHOLD — only reachable if a higher BCC authorization is
-                // configured via env (otherwise the per-transaction cap above already blocks > daily max).
-                const limitAmount = fromUsd(getBccDailyMaxUsd(), currentTx.currency, rateBuy);
-                if (priceBuy > limitAmount && user.kyc_status !== "VERIFIED") {
-                    return await sendKYCVerificationLink(phone, supabase, `Votre compte n'est pas encore vérifié. La limite est de *${limitAmount.toLocaleString('fr-FR')} ${currentTx.currency}* par transaction non vérifiée.`);
-                }
 
                 await supabase.from("transactions").update({ base_amount: priceBuy }).eq("id", session.draft_transaction_id);
                 const feePctBuy = currentTx.applied_fee_percentage ?? 1.5;
@@ -1458,18 +1493,14 @@ export async function processMessage(phone: string, text: string) {
 async function handleInviteAcceptance(phone: string, session: any, supabase: any) {
     const { data: tx } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
-    // Fetch accepting user once — used for both KYC check and promo check below.
+    // Fetch the accepting user once — used by the promo check below.
+    // Note: no amount-based KYC gate here. Baseline identity is handled by the MNO at
+    // wallet registration; transactions are hard-capped at the BCC limit, so there is no
+    // "high-value" tier to gate. Enhanced ID verification (Smile ID) is triggered only on
+    // the structuring/ping-pong signal in the price-entry handlers.
     const { data: acceptingUser } = await supabase.from("users")
         .select("kyc_status, promo_code_applied")
         .eq("phone_number", phone).single();
-
-    // 🛡️ COMPLIANCE: KYC GATE FOR THE COUNTERPARTY ON HIGH-VALUE TRANSACTIONS
-    const kycLimit = tx.currency === "USD" ? 500 : 1415000;
-    if (tx.base_amount > kycLimit) {
-        if (acceptingUser?.kyc_status !== "VERIFIED") {
-            return await sendKYCVerificationLink(phone, supabase, `Cette transaction dépasse *${kycLimit} ${tx.currency}*. Les deux parties doivent être vérifiées pour ce montant.`);
-        }
-    }
 
     // 🎫 PROMO CHECK: If the accepting party has a promo code better than the current fee, apply it.
     // This covers the case where the initiator didn't have a promo but the counterparty does.
