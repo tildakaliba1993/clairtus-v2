@@ -44,10 +44,17 @@
 - *Tests first:* a trivial package import test + CI green on a sample unit test.
 - *Done when:* `pnpm test` runs across workspaces in CI.
 
-**T0.2 [REUSE][MVP] Move existing code into monorepo (no behavior change)**
-- Relocate current Supabase functions, website, admin into `apps/`; existing `_shared` into a temporary home.
-- *Tests first:* characterization tests capturing current escrow behavior (fee/split, BCC limits) before refactor.
-- *Done when:* existing suites pass in the monorepo; DRC app deployable unchanged.
+**T0.2 [REUSE][MVP] Bring existing apps into the workspace — RESOLVED BY DECISION (in-place inclusion)**
+- **Decision:** do NOT physically relocate the live apps into `apps/`. The Supabase
+  functions (`supabase/`), website (`website/`), and admin panel (`admin-panel/`) each
+  deploy from their current paths (Supabase CLI conventions; Vercel root directories).
+  Moving them would break those deploys for no MVP benefit. They are included in the
+  monorepo **in place**; `apps/` is reserved for the new `b2b-api` (E3).
+- The meaningful goal — existing code sharing the new packages — is achieved: the **B2C
+  WhatsApp app now consumes `@clairtus/core`** (via the vendored `core.deno.js` bundle),
+  proven by `deno check` + Deno parity tests.
+- *Done:* B2C shares the core; live deploys unchanged; physical relocation deferred to a
+  future deploy-coordinated change (update Vercel root dirs + Supabase paths together).
 
 **T0.3 [REUSE][MVP] Extract escrow core (`packages/core`)**
 - Extract escrow lifecycle + fee/split engine from `stateMachine.ts` into pure, channel/rail-agnostic functions returning `{escrow, ledgerOps, railOps, events}`.
