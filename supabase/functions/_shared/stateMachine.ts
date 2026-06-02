@@ -4,6 +4,7 @@ import { getSupabaseClient } from "./supabaseClient.ts";
 import { MESSAGES } from "./whatsappMessaging.ts";
 import { initiatePawaPayPayout, initiatePawaPayDeposit } from "./pawapayClient.ts";
 import { notifyAdmin } from "./adminAlerts.ts";
+import { getDepositAmount, computePayout } from "./coreFees.ts";
 
 const TC_MESSAGE = "📜 *Conditions d'utilisation - Clairtus*\n\n1️⃣ L'argent de l'acheteur est strictement bloqué jusqu'à livraison (code PIN).\n2️⃣ Clairtus prélève 1.5% de frais d'escrow, répartis selon l'accord entre les parties.\n3️⃣ En cas de litige, les fonds sont gelés jusqu'à arbitrage.\n4️⃣ Conformément à la Banque Centrale du Congo (BCC) : maximum *500 USD par transaction et par jour*, et *2 500 USD par mois* (équivalents en CDF au taux du jour).\n\n🔗 *Conditions & Confidentialité :* https://clairtus.com\n\nEn continuant, vous acceptez ces conditions.";
 
@@ -179,13 +180,9 @@ async function buyerLimitsInfo(supabase: any, buyerPhone: string, currency: stri
            rateLine(currency, rate);
 }
 
-// Computes the actual deposit amount the buyer pays based on who covers the escrow fee.
-export function getDepositAmount(base: number, feePct: number, feeResp?: string | null): number {
-    const fee = base * feePct / 100;
-    if (feeResp === 'BUYER') return parseFloat((base + fee).toFixed(2));
-    if (feeResp === 'SPLIT') return parseFloat((base + fee / 2).toFixed(2));
-    return base; // SELLER (default)
-}
+// Fee/deposit/payout math now lives in the shared escrow core (@clairtus/core),
+// consumed via the coreFees adapter (imported above). Re-exported so pawapay-webhook keeps importing it.
+export { getDepositAmount };
 
 // Builds the fee responsibility choice message shown to the transaction initiator.
 // feePct must be > 0 — callers should skip this screen entirely when feePct === 0.
@@ -1225,20 +1222,11 @@ export async function processMessage(phone: string, text: string) {
                         await sendWhatsAppText(phone, MESSAGES.PAYOUT_INITIATED);
 
                         const feePercentage = txFunded.applied_fee_percentage ?? 1.5;
-                        const feeMultiplier = feePercentage / 100;
-                        const depositAmt = getDepositAmount(txFunded.base_amount, feePercentage, txFunded.fee_responsibility);
-                        let secondaryGross = 0;
-
-                        if (txFunded.secondary_vendor_phone && txFunded.secondary_vendor_amount) {
-                            secondaryGross = Number(txFunded.secondary_vendor_amount);
-                        }
-
-                        const secondaryFee = Math.round(secondaryGross * feeMultiplier);
-                        const totalFee = Math.round(txFunded.base_amount * feeMultiplier);
-                        const primaryFee = totalFee - secondaryFee;
-
-                        const primaryNet = parseFloat((depositAmt - secondaryGross - totalFee).toFixed(2));
-                        const secondaryNet = secondaryGross - secondaryFee;
+                        const secondaryGross = (txFunded.secondary_vendor_phone && txFunded.secondary_vendor_amount)
+                            ? Number(txFunded.secondary_vendor_amount) : 0;
+                        const { primaryNet, secondaryNet } = computePayout(
+                            txFunded.base_amount, feePercentage, txFunded.fee_responsibility, secondaryGross,
+                        );
 
                         const primaryPayoutId = crypto.randomUUID();
                         const secondaryPayoutId = crypto.randomUUID();
@@ -1326,20 +1314,11 @@ export async function processMessage(phone: string, text: string) {
                 const { data: txToPay } = await supabase.from("transactions").select("*").eq("id", session.draft_transaction_id).single();
 
                 const feePercentage = txToPay.applied_fee_percentage ?? 1.5;
-                const feeMultiplier = feePercentage / 100;
-                const depositAmtPay = getDepositAmount(txToPay.base_amount, feePercentage, txToPay.fee_responsibility);
-                let secondaryGross = 0;
-
-                if (txToPay.secondary_vendor_phone && txToPay.secondary_vendor_amount) {
-                    secondaryGross = Number(txToPay.secondary_vendor_amount);
-                }
-
-                const secondaryFee = Math.round(secondaryGross * feeMultiplier);
-                const totalFee = Math.round(txToPay.base_amount * feeMultiplier);
-                const primaryFee = totalFee - secondaryFee;
-
-                const primaryNet = parseFloat((depositAmtPay - secondaryGross - totalFee).toFixed(2));
-                const secondaryNet = secondaryGross - secondaryFee;
+                const secondaryGross = (txToPay.secondary_vendor_phone && txToPay.secondary_vendor_amount)
+                    ? Number(txToPay.secondary_vendor_amount) : 0;
+                const { primaryNet, secondaryNet } = computePayout(
+                    txToPay.base_amount, feePercentage, txToPay.fee_responsibility, secondaryGross,
+                );
 
                 let isRetryCommand = cleanText.toUpperCase() === "RÉESSAYER" || cleanText.toUpperCase() === "REESSAYER";
                 let primaryTargetPhone = isRetryCommand ? phone : cleanText.replace(/\+/g, '').replace(/\s/g, '');
