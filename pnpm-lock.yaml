@@ -21,19 +21,40 @@ importers:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@22.19.19)
 
+  packages/compliance: {}
+
   packages/core:
+    dependencies:
+      '@clairtus/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@clairtus/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.2.17
+        version: 0.2.17
+      esbuild:
+        specifier: ^0.24.0
+        version: 0.24.2
+
+  packages/ledger:
     dependencies:
       '@clairtus/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
-      esbuild:
-        specifier: ^0.24.0
-        version: 0.24.2
+      '@electric-sql/pglite':
+        specifier: ^0.2.17
+        version: 0.2.17
 
   packages/shared: {}
 
 packages:
+
+  '@electric-sql/pglite@0.2.17':
+    resolution: {integrity: sha512-qEpKRT2oUaWDH6tjRxLHjdzMqRUGYDnGZlKrnL4dJ77JVMcP2Hpo3NYnOSPKdZdeec57B6QPprCUFg0picx5Pw==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -713,6 +734,8 @@ packages:
     hasBin: true
 
 snapshots:
+
+  '@electric-sql/pglite@0.2.17': {}
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true

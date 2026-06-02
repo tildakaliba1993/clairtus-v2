@@ -1,5 +1,5 @@
 {
-  "name": "@clairtus/core",
+  "name": "@clairtus/ledger",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,15 +10,12 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build:deno": "esbuild src/index.ts --bundle --format=esm --platform=neutral --outfile=dist/core.deno.js"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@clairtus/shared": "workspace:*",
-    "@clairtus/ledger": "workspace:*"
+    "@clairtus/shared": "workspace:*"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
     "@electric-sql/pglite": "^0.2.17"
   }
 }
