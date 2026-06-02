@@ -1,4 +1,3 @@
-// AUTO-GENERATED — DO NOT EDIT. Built from packages/core via: pnpm run build:b2c-core
 // ../shared/src/money.ts
 var MoneyError = class extends Error {
 };

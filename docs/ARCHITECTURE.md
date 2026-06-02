@@ -29,7 +29,7 @@
 | B2C WhatsApp | Existing Supabase Edge (Deno), repointed to shared core | Don't rewrite what works |
 | Web + dashboards | **Next.js** | Already in use (website, admin, future client dashboard) |
 | Hosting | Supabase (DB) + Vercel (Next) + **Fly.io/Render** (API container) | Lean, cheap, scalable |
-| Testing | **Vitest** + Supertest + **Testcontainers** (real Postgres) + rail contract tests | Fast, real, TDD-friendly |
+| Testing | **Vitest** + Supertest + **pglite** (in-process Postgres, Docker-free) + rail contract tests | Fast, real, TDD-friendly, no Docker |
 | Queue/events | Postgres-backed queue (reuse existing pattern) + DLQ | No broker cost for MVP; upgrade later |
 | Observability | OpenTelemetry + structured logs (managed APM later) | Cash-minimal now |
 
@@ -269,7 +269,7 @@ The B2C app is **never down**; we replace internals behind a stable behavior con
 ## 16. Testing Strategy (TDD)
 
 - **Unit:** pure domain functions (state machine, fee/split, ledger postings, compliance evaluator) — written test-first.
-- **Integration:** Postgres via **Testcontainers** (real DB); ledger correctness; RLS isolation.
+- **Integration:** Postgres via **pglite** (Postgres compiled to WASM, runs in-process — **no Docker**); ledger correctness; RLS isolation. For heavier/CI runs, a local Homebrew Postgres or a free hosted test DB (Neon / second Supabase project) is an alternative. The entire dev + test loop (vitest, `deno test`, `deno check`, pglite) is Docker-free by design.
 - **Contract tests for rails:** record/replay against each provider's sandbox; verify adapter ↔ `NormalizedEvent` mapping.
 - **API e2e:** Supertest against the NestJS app with seeded tenants.
 - **Invariants:** every posting group balances; escrow can never release more than held; idempotent replays are no-ops.

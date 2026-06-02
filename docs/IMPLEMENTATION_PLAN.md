@@ -72,7 +72,7 @@
 
 **T1.1 [BUILD][MVP] Double-entry ledger (`packages/ledger`)**
 - `ledger_accounts`, `ledger_entries` (immutable), balanced posting groups; money in integer minor units.
-- *Tests first:* posting group balances; balance derivation; reversing entries; concurrency (parallel postings don't corrupt balances) via Testcontainers.
+- *Tests first:* posting group balances; balance derivation; reversing entries; concurrency (parallel postings don't corrupt balances) via **pglite** (in-process Postgres, no Docker).
 - *Done when:* invariant #1 enforced in code + DB; balances reconcile under concurrent writes.
 
 **T1.2 [BUILD][MVP] Escrow ledger operations**
