@@ -10,9 +10,13 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:deno": "esbuild src/index.ts --bundle --format=esm --platform=neutral --outfile=dist/core.deno.js"
   },
   "dependencies": {
     "@clairtus/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
   }
 }
