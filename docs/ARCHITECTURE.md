@@ -1,0 +1,291 @@
+# Clairtus — Architecture & Design Document
+
+**Status:** Draft v1 (for scrutiny & approval)
+**Owner:** CTO (Product & Engineering)
+**Related docs:** `PRD.md`, `IMPLEMENTATION_PLAN.md`
+
+---
+
+## 1. Principles
+
+1. **One brain, many surfaces.** The escrow logic lives in shared packages. The B2C WhatsApp app and the B2B API are thin, standalone products that consume it.
+2. **Rail-agnostic.** No product code depends on a specific payment provider. Rails (PawaPay, Korapay, Fincra…) are adapters behind one interface, switchable by config.
+3. **Ledger is the source of truth for money.** Every cent is a double-entry posting. Escrow = funds in a held ledger account.
+4. **Multi-tenant from the start.** Every row is scoped to a tenant; isolation enforced at the database.
+5. **TDD always.** Tests are written first (red → green → refactor). Money logic has no untested paths.
+6. **Strangler-fig, not big-bang.** We extract the core *while the live DRC product keeps running*.
+7. **Lean & bootstrapped.** Build on Postgres + free tiers; buy nothing we can responsibly build.
+
+---
+
+## 2. Tech Stack (decided)
+
+| Concern | Choice | Rationale |
+|---|---|---|
+| Language | **TypeScript** end-to-end | Leverages existing code; one language; max AI-native velocity |
+| Monorepo | **pnpm + Turborepo** | Fast, simple, free; clean package boundaries |
+| B2B API | **NestJS** | Structured, modular, DI, excellent testability for TDD, scales |
+| Database | **PostgreSQL (Supabase)** | Keep it — scales; gives auth/storage/realtime; RLS for tenant isolation |
+| B2C WhatsApp | Existing Supabase Edge (Deno), repointed to shared core | Don't rewrite what works |
+| Web + dashboards | **Next.js** | Already in use (website, admin, future client dashboard) |
+| Hosting | Supabase (DB) + Vercel (Next) + **Fly.io/Render** (API container) | Lean, cheap, scalable |
+| Testing | **Vitest** + Supertest + **Testcontainers** (real Postgres) + rail contract tests | Fast, real, TDD-friendly |
+| Queue/events | Postgres-backed queue (reuse existing pattern) + DLQ | No broker cost for MVP; upgrade later |
+| Observability | OpenTelemetry + structured logs (managed APM later) | Cash-minimal now |
+
+> Note on runtime split: the B2B API runs as a NestJS service (Node). The B2C webhook stays on Supabase Edge (Deno) for now but imports the same `core` package (published internally). Acceptable short-term; consolidate later if desired.
+
+---
+
+## 3. Monorepo Layout
+
+```
+clairtus/
+├── packages/                       # shared "common bases"
+│   ├── core/        # escrow domain: entities, state machine, lifecycle, fee + split engine (RAIL- & CHANNEL-AGNOSTIC)
+│   ├── ledger/      # double-entry: accounts, postings, balances, holds
+│   ├── payments/    # PaymentRail interface + Router + adapters: pawapay | korapay (| fincra later)
+│   ├── kyc/         # KYCProvider interface + adapters: smile-id
+│   ├── compliance/  # per-market rule engine (limits, FX, velocity/structuring), audit
+│   ├── notifications/ # channel-agnostic: whatsapp | email | webhook
+│   └── shared/      # types, config, db client, idempotency, errors, logging
+├── apps/
+│   ├── b2b-api/     # NestJS — the B2B Escrow Infrastructure API + webhooks
+│   ├── b2c-whatsapp/# consumer product (WhatsApp client over core) — live DRC app
+│   ├── admin/       # command center (dispute resolution, ops) — Next.js
+│   ├── client-dashboard/ # tenant-facing dashboard (keys, escrows, balances, logs) — Next.js
+│   └── website/     # marketing + /kyc + /receipt — Next.js
+├── docs/            # PRD, ARCHITECTURE, IMPLEMENTATION_PLAN
+└── infra/           # migrations, seeds, IaC, CI
+```
+
+---
+
+## 4. Escrow Core Domain (`packages/core`)
+
+**Entities:** `Escrow`, `Party` (buyer/seller/secondary), `MoneyLeg` (a pay-in or payout), `FeeBreakdown`.
+
+**Escrow state machine** (channel- and rail-agnostic):
+
+```
+DRAFT → AWAITING_FUNDING → FUNDED(held) → RELEASING → SETTLING → COMPLETED
+                                   │
+                                   ├→ PARTIALLY_RELEASED → … (milestones)
+                                   ├→ REFUNDING → REFUNDED
+                                   ├→ DISPUTED → (RELEASED | REFUNDED)
+                                   └→ CANCELLED
+```
+
+Each transition:
+- is a pure, tested function (`transition(escrow, event) → {escrow, ledgerOps, railOps, domainEvents}`);
+- emits **domain events** (the webhook + reputation-graph source);
+- produces **ledger operations** (postings) and **rail operations** (pay-in/payout intents) that the app layer executes.
+
+The B2C state machine's existing escrow rules (PIN release, fee/split, BCC checks) are **extracted** into this core unchanged in behavior.
+
+---
+
+## 5. Double-Entry Ledger (`packages/ledger`) — built on Postgres
+
+**Why double-entry:** correctness, auditability, and balances that always reconcile. This is the heart of the platform.
+
+**Accounts (per tenant):**
+- `escrow_held:{escrowId}` — funds held for a specific escrow.
+- `tenant_payable:{tenantId}` — platform commission owed to the tenant.
+- `clairtus_revenue` — our fee.
+- `recipient_payable:{partyId}` — net owed to a seller/beneficiary pending payout.
+- `external:rail:{rail}` — contra account representing money in/out at the PSP.
+
+**Core tables:**
+```
+ledger_accounts(id, tenant_id, type, owner_ref, currency, created_at)
+ledger_entries(id, tenant_id, account_id, escrow_id, direction[debit|credit],
+               amount, currency, posting_group_id, created_at)   -- immutable
+ledger_balances (materialized/derived per account)               -- sum of entries
+```
+
+**Rules:**
+- Every money event posts a **balanced posting group** (sum of debits = sum of credits). Enforced in code + a DB constraint/trigger.
+- Entries are **append-only/immutable**; corrections are reversing entries.
+- **Escrow hold** = credit `escrow_held:{escrowId}`. **Release** = debit `escrow_held`, credit `recipient_payable` + `clairtus_revenue` + `tenant_payable`. **Payout** = debit `recipient_payable`, credit `external:rail`.
+- Balance queries are derived; concurrency handled via transactional posting + row locks; idempotency via `posting_group_id` tied to an idempotency key.
+
+**Money representation:** integer **minor units** (cents/centimes) + currency code. Never floats.
+
+---
+
+## 6. Payment Rail Abstraction (`packages/payments`)
+
+**The plug interface:**
+```ts
+interface PaymentRail {
+  id: 'pawapay' | 'korapay' | 'fincra';
+  capabilities: {
+    payIn: boolean; payOut: boolean; hold: boolean;
+    countries: string[]; currencies: string[]; methods: PaymentMethod[];
+  };
+  initiatePayIn(req: PayInRequest): Promise<PayInResult>;     // returns instructions / link / virtual account
+  initiatePayout(req: PayoutRequest): Promise<PayoutResult>;
+  getStatus(ref: string): Promise<RailStatus>;
+  parseWebhook(body, headers): NormalizedEvent;               // normalize each provider's webhook to ONE shape
+  verifyWebhook(body, headers): boolean;                      // signature verification
+}
+```
+
+**Rail Router:** selects a rail by `{country, currency, method, amount}`, honoring per-rail **enable/disable flags** and **failover** order. Config-driven — switching a rail on/off requires no code change.
+
+**Adapters (MVP):**
+- `pawapay` — DRC mobile money (refactor of existing client).
+- `korapay` — SA pay-in (card/EFT/PayShap), **hold-in-balance**, payouts, webhooks.
+- `fincra` — later.
+
+**Normalized events** map every provider's webhook into the core event model (`payin.succeeded`, `payin.failed`, `payout.succeeded`, `payout.failed`), with idempotent processing.
+
+### 6.1 How escrow "hold" works on commodity rails (important)
+
+We do **not** require a PSP to offer a native "escrow" or "conditional release" product — that capability is what **we** add. We build it on two commodity primitives every serious PSP has:
+1. **Collect-into-balance:** the buyer's pay-in settles into **our balance/wallet at the PSP** (Korapay default = Kora balance; Fincra = wallet).
+2. **Payout-from-balance-on-trigger:** we disburse to the seller from that balance whenever **we** decide.
+
+**The escrow = funds resting in the PSP balance + our ledger's per-escrow attribution + us choosing when to call payout.** The "hold" is simply us not triggering the payout until the release condition (delivery/PIN/milestone) is met.
+
+**Custody rule:** keep funds in the **PSP's balance/float** (do NOT enable auto-settle-to-our-bank). This keeps custody with the *licensed* PSP — we only orchestrate. Letting funds settle to our own bank would make us the custodian of pooled client funds and trigger escrow-agent/trust-account regulation we don't want pre-licence. Per-escrow attribution within the pooled balance lives in our ledger (the Stripe-Connect-style model); per-transaction *segregated* virtual accounts (e.g., via Fincra) are a later enhancement.
+
+---
+
+## 7. KYC Abstraction (`packages/kyc`)
+
+```ts
+interface KycProvider {
+  id: 'smile-id';
+  startVerification(party, level): Promise<{ sessionUrl | token }>;
+  parseCallback(body, headers): { partyRef, status, resultCode };
+  verifyCallback(body, headers): boolean;
+}
+```
+Smile ID adapter wraps existing integration. KYC status is stored on `Party` and gates higher-ticket releases per the compliance engine.
+
+---
+
+## 8. Compliance / Rule Engine (`packages/compliance`)
+
+- **Per-market rule sets**: limits (min/per-tx/daily/monthly), KYC thresholds, currency, live FX.
+  - DRC: BCC (1 USD min; 500 USD/day & per-tx; 2,500 USD/month; live USD↔CDF).
+  - SA: FICA-aligned basics for MVP.
+- **Velocity / structuring detection** (reused from B2C): flag suspicious patterns; trigger KYC step-up.
+- **Audit log**: immutable record of every compliance decision.
+- Rules are data-driven (per tenant + per market), evaluated by a pure, tested evaluator.
+
+---
+
+## 9. Multi-Tenancy, Auth & Config
+
+- **Tenant** = a client platform. Everything carries `tenant_id`.
+- **Isolation:** Postgres **Row-Level Security** keyed to the authenticated tenant; defense-in-depth in the service layer too.
+- **API keys:** `test` and `live` keys per tenant; stored hashed; scoped; rotatable.
+- **Per-tenant config:** fee schedule, enabled rails, webhook endpoints + signing secret, allowed currencies/markets.
+- **Auth:** API-key bearer auth on the public API; admin/dashboard via Supabase auth.
+
+---
+
+## 10. B2B API Surface (NestJS)
+
+- **REST**, versioned (`/v1`), JSON, cursor pagination, consistent error envelope.
+- **Idempotency-Key** header required on all POSTs that move money.
+- **Resources/endpoints (MVP):**
+  - `POST /v1/escrows`, `GET /v1/escrows/:id`, `POST /v1/escrows/:id/fund`, `/release`, `/refund`, `/cancel`, `/dispute`
+  - `POST /v1/parties`, `GET /v1/parties/:id`
+  - `POST /v1/payouts`, `GET /v1/payouts/:id`
+  - `GET /v1/balances`, `GET /v1/ledger`
+  - `POST /v1/kyc/checks`
+  - `POST /v1/webhook-endpoints`, key management
+- **NestJS modules** map 1:1 to bounded contexts (escrow, ledger, payments, kyc, compliance, tenancy, webhooks) — each independently testable.
+
+---
+
+## 11. Webhooks (outbound to tenants)
+
+- Signed (HMAC over body + timestamp), **retried with backoff**, idempotent on the receiver.
+- **Event catalog:** `escrow.created`, `escrow.funded`, `escrow.released`, `escrow.partially_released`, `escrow.refunded`, `escrow.disputed`, `payout.succeeded`, `payout.failed`, `kyc.completed`.
+- Delivery log visible in the dashboard; replay supported.
+
+---
+
+## 12. Data Model (key tables, beyond ledger)
+
+```
+tenants(id, name, country, status, created_at)
+api_keys(id, tenant_id, mode[test|live], hash, last4, scopes, created_at, revoked_at)
+parties(id, tenant_id, external_ref, role, phone, name, kyc_status, kyc_result_code, trust_score, created_at)
+escrows(id, tenant_id, external_ref, status, base_amount, currency, fee_config, fee_responsibility,
+        buyer_party_id, seller_party_id, secondary_party_id, secondary_amount, created_at, updated_at)
+payins(id, tenant_id, escrow_id, rail, rail_ref, amount, currency, status, created_at)
+payouts(id, tenant_id, escrow_id, recipient_party_id, rail, rail_ref, amount, currency, status, created_at)
+events(id, tenant_id, escrow_id, type, payload, created_at)              -- domain + webhook + reputation source
+webhook_endpoints(id, tenant_id, url, signing_secret, active)
+webhook_deliveries(id, endpoint_id, event_id, status, attempts, next_retry_at)
+idempotency_keys(key, tenant_id, request_hash, response, created_at)
+kyc_checks(id, tenant_id, party_id, provider, status, result_code, created_at)
+disputes(id, tenant_id, escrow_id, status, reason, resolution, created_at)
+fx_rates(id, usd_cdf, source, updated_at)                                -- reused
+```
+All tenant-scoped tables have RLS policies on `tenant_id`.
+
+---
+
+## 13. B2C WhatsApp App — extraction plan (strangler-fig)
+
+1. Move existing code into the monorepo unchanged (behavior parity).
+2. Extract escrow lifecycle + fee/split + BCC checks into `packages/core` + `packages/compliance`.
+3. Refactor PawaPay into `packages/payments/pawapay`.
+4. Repoint the WhatsApp webhook to call `core` (now a thin channel client).
+5. Verify parity in the DRC (live), then proceed to B2B build on the same core.
+
+The B2C app is **never down**; we replace internals behind a stable behavior contract, covered by tests.
+
+---
+
+## 14. Security
+
+- API-key bearer auth, hashed secrets, per-tenant RLS, least-privilege DB roles.
+- TLS everywhere; secrets in env/secret manager (never in client bundles — already fixed for `ADMIN_SECRET`).
+- **Minimal PCI scope:** MVP uses hosted/redirect collection (no raw card data touches us). Raw Card API only with a PCI program later.
+- Webhook signature verification (inbound rail webhooks + outbound to tenants).
+- Immutable audit log; data retention per market (≥5–10 yrs).
+
+---
+
+## 15. Reliability & Observability
+
+- **Idempotency** on every money op (`Idempotency-Key` → `idempotency_keys`).
+- **Durable queue + DLQ** for pay-in/payout processing and webhook delivery (reuse `payment_queue` pattern).
+- **Per-rail circuit breakers** (reuse existing breaker logic) in the router.
+- Structured logging with correlation IDs; OpenTelemetry traces; metrics + alerts from day one.
+
+---
+
+## 16. Testing Strategy (TDD)
+
+- **Unit:** pure domain functions (state machine, fee/split, ledger postings, compliance evaluator) — written test-first.
+- **Integration:** Postgres via **Testcontainers** (real DB); ledger correctness; RLS isolation.
+- **Contract tests for rails:** record/replay against each provider's sandbox; verify adapter ↔ `NormalizedEvent` mapping.
+- **API e2e:** Supertest against the NestJS app with seeded tenants.
+- **Invariants:** every posting group balances; escrow can never release more than held; idempotent replays are no-ops.
+- **Definition of Done:** feature has failing tests first, then green, then refactor; CI runs all suites.
+
+---
+
+## 17. Environments & Deployment
+
+- **Environments:** `sandbox` (simulated rails, test keys) and `production` (live rails, live keys) — parity enforced.
+- **CI/CD:** Turborepo pipeline; run tests + lint + typecheck on PR; deploy API to Fly.io/Render, Next apps to Vercel, migrations via `infra/`.
+- **Migrations:** versioned SQL; never destructive without review.
+
+---
+
+## 18. Scalability Roadmap (beyond MVP)
+
+- Partition ledger by tenant; read replicas; move queue to a broker (e.g., NATS/SQS) if volume demands.
+- Add rails (Fincra, cards, more countries) purely as adapters.
+- Ship the **reputation graph** product on the accumulated `events` + `parties` data.
+- Pursue own EME/PSP licences per market (the deep moat).
