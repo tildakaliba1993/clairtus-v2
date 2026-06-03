@@ -36,7 +36,7 @@ bootstrapped/cash-minimal.
 |---|---|
 | **E0** Monorepo + escrow core | ✅ Merged (PR #10) |
 | **E1** Ledger + lifecycle + compliance | ✅ Merged (PR #11) |
-| **E2** Payment-rail abstraction | 🟡 In progress — T2.1 ✅, T2.2 ✅, **T2.3 in progress** |
+| **E2** Payment-rail abstraction | 🟡 In progress — T2.1 ✅, T2.2 ✅, **T2.3 adapter ✅ + custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay sign-off** |
 | E3 Multi-tenancy + B2B API | ⬜ Not started |
 | E4 KYC + sandbox + docs + SDK | ⬜ |
 | E5 Dashboard + hardening + onboarding | ⬜ |
@@ -50,7 +50,8 @@ bootstrapped/cash-minimal.
 - `@clairtus/compliance` — per-market limit engine (BCC: min 1 / daily 500 / monthly 2500 USD),
   live-FX `toUsd/fromUsd`, `checkAmountBounds`, `checkVolumeLimits`, `isStructuring`.
 - `@clairtus/payments` — `PaymentRail` interface + `NormalizedEvent` + `RailRouter`
-  (config-driven, enable/disable, failover) + **PawaPay adapter** (DRC mobile money).
+  (config-driven, enable/disable, failover) + **PawaPay adapter** (DRC mobile money)
+  + **Korapay adapter** (SA/NG pay-in + payout-from-balance, webhook HMAC verify).
 
 ### Invariants (asserted across tests — keep true)
 1. Every ledger posting group balances (Σdebits = Σcredits).
@@ -60,27 +61,77 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E2 / T2.3 — Korapay adapter (SA) + custody spike
-
-**Custody question: ANSWERED ✅** — Korapay settles collected funds into the
-**Korapay Balance** (confirmed in dashboard: "NGN Transactions will be settled into
-your Korapay Balance"). So fund → hold in balance → disburse on trigger works.
+## NEXT: E2 / T2.3 — Korapay adapter (SA) — 🟢 adapter built + custody model PROVEN (a)+(c); (b)+(d) need Korapay written confirmation
 
 **Korapay sandbox creds:** in `packages/payments/.env.local` (git-ignored):
 `KORAPAY_SECRET_KEY` (sk_test_…), `KORAPAY_PUBLIC_KEY` (pk_test_…), `KORAPAY_ENCRYPTION_KEY`.
-Entity: **Fincrest (Pty) Ltd**, Korapay merchant ID **KPY58368**, default currency **NGN**.
+Entity: **Fincrest (Pty) Ltd**, Korapay merchant ID **KPY58368**, default currency **NGN**
+(sandbox is pre-funded with 5,000,000 in every currency incl. NGN + ZAR).
 API base: `https://api.korapay.com`. Docs: developers.korapay.com.
 
-**To build (mirror the PawaPay adapter pattern — config + fetch injected, contract tests with fake fetch):**
-- `packages/payments/src/adapters/korapay.ts` implementing `PaymentRail`:
-  - `initiatePayIn` → Korapay **charge / collection** API (bank transfer / card / PayShap).
-  - `initiatePayout` → Korapay **disbursement** (`/transactions/disburse`), from balance.
-  - `getStatus` → Korapay transaction status.
-  - `parseWebhook` → Korapay webhook (`data` payload) → `NormalizedEvent`.
-  - `verifyWebhook` → **HMAC-SHA256 of the `data` field using the SECRET KEY** (Korapay's scheme).
-  - capabilities: countries `['ZA']` (and later NG/KE/GH), currencies (ZAR/NGN/USD per account), methods `['bank_transfer','card']`, `hold: true`.
-- Contract tests (fake fetch + fixtures from docs): request shape, response/status mapping, webhook parse + signature verify.
-- **Custody spike script** (uses `.env.local`): hit Korapay sandbox to fund-in → confirm balance holds → disburse-from-balance → confirm. Verify with real sandbox calls.
+### Adapter — DONE ✅ (`packages/payments/src/adapters/korapay.ts`, 17 contract tests green)
+Mirrors the PawaPay pattern (config + fetch injected, fake-fetch contract tests):
+- `initiatePayIn` → `POST /merchant/api/v1/charges/bank-transfer` (virtual account) for
+  `bank_transfer`, else `POST /merchant/api/v1/charges/initialize` (hosted checkout / redirect — keeps us out of PCI scope).
+- `initiatePayout` → `POST /merchant/api/v1/transactions/disburse` (from balance).
+- `getStatus` → `GET /merchant/api/v1/charges/:ref`; `getPayoutStatus` → `…/transactions/:ref`.
+- `getBalances` → `GET /merchant/api/v1/balances` (→ minor units per currency).
+- `parseWebhook` → `{event,data}` → `NormalizedEvent` (charge.success/failed, transfer.success/failed).
+- `verifyWebhook` → **HMAC-SHA256 of `JSON.stringify(data)` with the SECRET KEY**, hex,
+  header `x-korapay-signature`, timing-safe compare. (Confirmed against Korapay docs.)
+- capabilities: countries `['ZA','NG']`, currencies `['ZAR','NGN','USD']`, methods
+  `['bank_transfer','card']`, `hold: true`.
+
+### Custody spike — RAN against live sandbox (`packages/payments/scripts/korapay-custody-spike.ts`)
+`node --experimental-strip-types packages/payments/scripts/korapay-custody-spike.ts`. Findings vs the 4 T2.3 criteria:
+- **(a) collect-into-balance — CONFIRMED ✅** `charges/bank-transfer` returns a temporary
+  virtual account, status `processing`; a settled ₦1,000 test charge credited the balance by
+  **+946.25 net** (1000 − 50 fee − 3.75 VAT). Funds land in and rest in our Korapay Balance.
+- **(b) no forced auto-sweep — partial / needs Korapay sign-off.** Charges sit at `processing`
+  in-balance pending our action; auto-settle-to-bank is NOT enabled. Multi-day hold behaviour
+  still to be confirmed in writing with Korapay (can't be proven by a single API call).
+- **(c) disburse-from-balance on our trigger — CONFIRMED ✅** `transactions/disburse` →
+  **HTTP 200** `status: processing`; balance **debited 5,001,892.50 → 5,000,860.25 = −₦1,032.25**
+  (₦1,000 payout + ₦32.25 fee). We release from balance whenever we choose. → the escrow
+  hold→release model works end-to-end on Korapay.
+- **(d) segregation — open / needs Korapay sign-off.** Korapay balance is a POOLED merchant
+  balance; per-escrow attribution is our ledger's job (ARCHITECTURE §6.1). Confirm held-funds
+  treatment/segregation with Korapay.
+
+> The earlier "Custody ANSWERED ✅ (dashboard string)" was premature — only (a) was evidenced.
+> Now (a) AND (c) are evidenced against the live sandbox. (b) + (d) are policy questions for
+> Korapay support, not falsifiable via the API; they don't block the adapter but are part of
+> the formal "custody confirmed" DoD.
+
+### End-to-end escrow demo — PASSED ✅ (`packages/payments/scripts/korapay-escrow-demo.ts`)
+One uninterrupted run, one escrow reference, no dashboard clicks (uses the **Sandbox Credit API**
+`POST /merchant/api/v1/virtual-bank-account/sandbox/credit` with `auto_complete:false` to settle the
+pay-in instantly; ~2-min auto-complete is the fallback). This satisfies the T2.3 "done when" —
+*a full escrow runs end-to-end with funds held in-balance and released on our trigger:*
+- FUND: ₦5,000 bank-transfer charge settled → balance **5,001,806.50 → 5,006,752.75 (+4,946.25 net)** = funds HELD.
+- RELEASE: disburse on our trigger → balance **5,006,752.75 → 5,001,774.50 (−4,978.25)** = released + payout fee.
+- Verdict: ✅ FULL hold→release lifecycle proven on Korapay sandbox.
+
+### ⚠️ Payout IP whitelisting — HARD DEPENDENCY for every environment
+Korapay gates the **payout/disburse API by source IP** (collections + balance reads are NOT gated —
+that asymmetry is why a valid `sk_test_` key 403'd only on `disburse`). A non-whitelisted IP →
+**HTTP 403 `not_authorized`**.
+- **Where:** Dashboard → **Settings → Security → IP Whitelisting**; per mode (whitelist in **Test**
+  for sandbox, again in **Live** for production). Takes a few minutes to propagate.
+- **Sandbox:** dev machine IP `105.233.157.107` whitelisted on 2026-06-03 → spike then succeeded.
+  ⚠️ This is a dynamic dev/network IP and will change; not durable.
+- **PRODUCTION TODO (plan in E3/E5 deploy):** payouts will run from the B2B API host
+  (Fly.io/Render). Provision a **static/dedicated egress IP** for that service and whitelist it in
+  Korapay **Live** mode, else all production payouts 403. Treat as a deploy-blocker for go-live.
+
+### Sandbox test data (from Korapay docs)
+- Payout SUCCESS: bank `033`, account `0000000000`. FAILURE: bank `035`. INVALID: bank `011`, acct `9999999999`.
+- Min/max NGN payout: **₦1,000 – ₦10,000,000** (amounts below ₦1,000 → HTTP 409 conflict).
+- Completing a pay-in leg fully (funds landing) needs the inbound transfer simulated in the sandbox dashboard.
+
+### To formally close T2.3 (remaining, non-code)
+1. Get Korapay's **written** answer on (b) multi-day hold (no auto-sweep) + (d) held-funds segregation.
+2. Plan the production static egress IP + Live-mode whitelist (carry into E3/E5).
 
 ---
 
