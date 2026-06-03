@@ -1,0 +1,30 @@
+{
+  "name": "@clairtus/b2b-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@clairtus/core": "workspace:*",
+    "@clairtus/ledger": "workspace:*",
+    "@clairtus/payments": "workspace:*",
+    "@clairtus/shared": "workspace:*",
+    "@clairtus/tenancy": "workspace:*",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "@nestjs/testing": "^11.0.0",
+    "@swc/core": "^1.7.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "unplugin-swc": "^1.5.1"
+  }
+}
