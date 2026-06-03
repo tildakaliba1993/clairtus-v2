@@ -37,7 +37,7 @@ bootstrapped/cash-minimal.
 | **E0** Monorepo + escrow core | ✅ Merged (PR #10) |
 | **E1** Ledger + lifecycle + compliance | ✅ Merged (PR #11) |
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
-| **E3** Multi-tenancy + B2B API | 🟡 In progress — **T3.1 ✅** (tenancy: tenants + API keys + RLS); T3.2 (NestJS skeleton) / T3.3 (endpoints) / T3.4 (webhooks) ⬜ |
+| **E3** Multi-tenancy + B2B API | 🟡 In progress — **T3.1 ✅** (tenancy) + **T3.2 ✅** (NestJS skeleton: guard/idempotency/envelope); T3.3 (endpoints) / T3.4 (webhooks) ⬜ |
 | E4 KYC + sandbox + docs + SDK | ⬜ |
 | E5 Dashboard + hardening + onboarding | ⬜ |
 
@@ -64,15 +64,22 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E3 / T3.2 — NestJS B2B API skeleton (auth guard + idempotency + error envelope)
+## NEXT: E3 / T3.3 — escrow / party / payout endpoints
 Branch `claude/e3-tenancy-api` (worktree `.claude/worktrees/e3-tenancy-api`), off main after PR #12.
-- **T3.1 ✅ DONE** — `@clairtus/tenancy` (tenants, hashed test/live API keys, RLS isolation; 10 tests).
-- **T3.2 (next)** — scaffold `apps/b2b-api` (NestJS): API-key guard wired to `Tenancy.authenticate`;
-  `Idempotency-Key` middleware → `idempotency_keys`; consistent error envelope; `/v1` versioning;
-  cursor pagination. *Tests first:* idempotent replay returns cached response (invariant #3); auth
-  guard (valid/invalid/revoked); error shape. Supertest against the Nest app with a seeded tenant.
-- **T3.3** escrow/party/payout endpoints · **T3.4** outbound signed webhooks.
-- Production note (from T2.3): payouts need a static egress IP whitelisted in Korapay **Live** mode.
+- **T3.1 ✅** — `@clairtus/tenancy` (tenants, hashed test/live API keys, RLS isolation; 10 tests).
+- **T3.2 ✅** — `apps/b2b-api` NestJS skeleton (13 tests). API-key guard → `Tenancy.authenticate`
+  (`@Public()` exempts health); `IdempotencyInterceptor` → `idempotency_keys` (invariant #3, 409 on
+  key reuse w/ different body); `HttpErrorFilter` envelope `{error:{code,message,statusCode}}`;
+  `/v1` global prefix; `buildPage`/`encode|decodeCursor` cursor pagination. **Toolchain:** vitest +
+  **unplugin-swc** (esbuild won't emit Nest's decorator metadata) — see `apps/b2b-api/vitest.config.ts`.
+  `@CurrentTenant()` param decorator. DB via `SQL` token (pglite in tests; **prod Postgres adapter
+  still TODO** — `UNCONFIGURED_SQL` throws until wired).
+- **T3.3 (next)** — wire core+ledger+router behind REST: `POST/GET /v1/escrows`,
+  `/fund /release /refund /cancel /dispute`, `/v1/parties`, `/v1/payouts`, `/v1/balances`, `/v1/ledger`.
+  Apply `tenantRlsSql` to each tenant data table; reads go through `withTenant`. Tests first (Supertest).
+- **T3.4** outbound signed webhooks.
+- Production notes: (1) wire a real Postgres `SqlExecutor` for `apps/b2b-api`; (2) payouts need a
+  static egress IP whitelisted in Korapay **Live** mode (from T2.3).
 
 ---
 
