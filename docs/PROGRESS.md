@@ -39,7 +39,7 @@ bootstrapped/cash-minimal.
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
 | **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
 | **E4** KYC + sandbox + docs + SDK | ✅ Complete (PR open) — T4.1 KYC · T4.2 sandbox/simulated rail · T4.3 OpenAPI + typed SDK + quickstart |
-| **E5** Dashboard + hardening + onboarding | 🟡 In progress — **T5.1 ✅** (client dashboard, design-system-matched); T5.2 (observability/hardening) / T5.3 (onboarding kit) ⬜ |
+| **E5** Dashboard + hardening + onboarding | 🟡 In progress — **T5.1 ✅** (dashboard) + **T5.2 ✅** (circuit breaker · queue+DLQ · logs/correlation); T5.3 (onboarding kit) ⬜ |
 
 ### Packages built (all green; ~104 tests)
 - `@clairtus/shared` — Money (integer minor units) + arithmetic + applyBps.
@@ -64,9 +64,9 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E5 / T5.2 — observability + reliability hardening
-**E3 (PR #13) + E4 (PR #14) complete. E5/T5.1 ✅** on branch `claude/e5-dashboard` (worktree
-`.claude/worktrees/e5-dashboard`, stacked on `claude/e4-kyc`). **170 tests** green.
+## NEXT: E5 / T5.3 — design-partner onboarding kit (last MVP task)
+**E3 (PR #13) + E4 (PR #14) complete. E5/T5.1 + T5.2 ✅** on branch `claude/e5-dashboard` (worktree
+`.claude/worktrees/e5-dashboard`, stacked on `claude/e4-kyc`). **186 tests** green.
 Merge order: **#13 (E3) → #14 (E4) → E5 PR**.
 
 ### E5 progress
@@ -79,9 +79,20 @@ Merge order: **#13 (E3) → #14 (E4) → E5 PR**.
   `GET /v1/payouts` + SDK `escrows.list()/payouts.list()/webhookDeliveries.list()`.
   Tests: format + 4 components (RTL) = 10; **`next build` passes** (9 routes). Toolchain: vitest +
   @vitejs/plugin-react + jsdom (Next server wiring is thin; lib + components are the tested core).
-- **T5.2 (next)** — structured logs + correlation IDs + OpenTelemetry; durable queue + DLQ for
-  pay-in/payout/webhooks; per-rail circuit breakers in the router. Tests first.
-- **T5.3** — design-partner onboarding kit (manual tenant onboarding runbook; per-partner config).
+- **T5.2 ✅** — reliability hardening (3 mechanisms, tested):
+  - **Circuit breaker + failover** in `RailRouter` (`packages/payments`): `CircuitBreaker`
+    (closed/open/half-open) per rail; `router.run()` fails over and skips open rails, re-trying
+    after cooldown. `breakerState(id)` for observability.
+  - **Durable queue + DLQ** (`@clairtus/queue`): `JobQueue` over SqlExecutor — enqueue/claim/
+    complete/fail with exponential backoff; dead-letters after max attempts. pglite-tested.
+  - **Structured logs + correlation IDs** (`@clairtus/observability`): JSON logger that stamps the
+    current correlation id (AsyncLocalStorage, propagates across awaits) — the seam for an OTel
+    exporter. `correlationMiddleware` wired into b2b-api (`X-Request-Id` echoed/generated).
+  - *Integration follow-ups:* route the API's payout path through `router.run` (currently a single
+    mode-selected rail); move webhook/payout retries onto `@clairtus/queue` (webhook has its own
+    retry today); attach an OpenTelemetry exporter to the logger/correlation seam.
+- **T5.3 (next)** — design-partner onboarding kit: manual tenant onboarding runbook + per-partner
+  config; the outreach → sandbox → pilot path. Mostly docs/process (PROCESS task).
 
 > To view the dashboard live you need the API running with a real Postgres adapter (carry-forward #1)
 > + `CLAIRTUS_API_URL`; then `next dev` and connect with a `ck_test_…` key.

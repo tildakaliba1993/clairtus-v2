@@ -11,6 +11,7 @@
     "@clairtus/core": "workspace:*",
     "@clairtus/kyc": "workspace:*",
     "@clairtus/ledger": "workspace:*",
+    "@clairtus/observability": "workspace:*",
     "@clairtus/payments": "workspace:*",
     "@clairtus/shared": "workspace:*",
     "@clairtus/tenancy": "workspace:*",
