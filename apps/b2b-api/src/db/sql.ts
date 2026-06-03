@@ -9,6 +9,13 @@ export const RAIL = 'PAYMENT_RAIL';
 /** DI token for the fetch implementation used to deliver outbound webhooks (overridable in tests). */
 export const FETCH = 'FETCH_IMPL';
 
+/** DI token for the KYC provider (a KycProvider, or null when KYC is not configured). */
+export const KYC_PROVIDER = 'KYC_PROVIDER';
+/** DI token for the URL Smile ID posts verification results to. */
+export const KYC_CALLBACK_URL = 'KYC_CALLBACK_URL';
+/** DI token: releases whose base amount exceeds this (minor units) require a VERIFIED seller. */
+export const KYC_RELEASE_THRESHOLD = 'KYC_RELEASE_THRESHOLD';
+
 export type { SqlExecutor };
 
 /** Idempotency ledger: one row per (tenant, Idempotency-Key) — caches the response. */

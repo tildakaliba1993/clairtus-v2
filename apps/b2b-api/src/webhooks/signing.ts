@@ -38,5 +38,6 @@ export const WEBHOOK_EVENTS = [
   'escrow.disputed',
   'payout.succeeded',
   'payout.failed',
+  'kyc.completed',
 ] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];

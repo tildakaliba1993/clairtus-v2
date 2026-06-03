@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@clairtus/core": "workspace:*",
+    "@clairtus/kyc": "workspace:*",
     "@clairtus/ledger": "workspace:*",
     "@clairtus/payments": "workspace:*",
     "@clairtus/shared": "workspace:*",

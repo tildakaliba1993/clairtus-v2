@@ -17,6 +17,8 @@ create table if not exists parties (
   phone text,
   account_ref text,
   bank_code text,
+  kyc_status text not null default 'NONE',
+  kyc_result_code text,
   created_at timestamptz not null default now()
 );
 
@@ -90,15 +92,30 @@ create table if not exists webhook_deliveries (
 create index if not exists webhook_deliveries_due_idx on webhook_deliveries(status, next_retry_at);
 `;
 
+/** KYC verification checks (one per startVerification), tenant-scoped. */
+export const KYC_SCHEMA = `
+create table if not exists kyc_checks (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  party_id uuid not null,
+  provider text not null,
+  status text not null default 'PENDING',
+  result_code text,
+  job_id text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+`;
+
 /** Tenant-scoped tables that get the RLS isolation policy. */
-export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries'] as const;
+export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries', 'kyc_checks'] as const;
 
 /**
  * Applies the full schema (tenancy + ledger + idempotency + domain + RLS). Used by tests;
  * production runs the equivalent versioned migrations under infra/.
  */
 export async function applyAllSchema(sql: SqlExecutor): Promise<void> {
-  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA];
+  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA];
   for (const block of blocks) {
     for (const stmt of block.split(';').map((s) => s.trim()).filter(Boolean)) {
       await sql.query(stmt);

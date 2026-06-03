@@ -38,7 +38,7 @@ bootstrapped/cash-minimal.
 | **E1** Ledger + lifecycle + compliance | ✅ Merged (PR #11) |
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
 | **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
-| E4 KYC + sandbox + docs + SDK | ⬜ |
+| **E4** KYC + sandbox + docs + SDK | 🟡 In progress — **T4.1 ✅** (KYC: Smile ID adapter + `/v1/kyc/checks` + gated release); T4.2 (sandbox/simulated rail) / T4.3 (docs+SDK) ⬜ |
 | E5 Dashboard + hardening + onboarding | ⬜ |
 
 ### Packages built (all green; ~104 tests)
@@ -64,8 +64,22 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E4 — KYC + sandbox + docs + SDK
-**E3 is COMPLETE** (branch `claude/e3-tenancy-api`, PR open). 129 tests green across packages + app.
+## NEXT: E4 / T4.2 — sandbox environment + simulated rail
+**E3 complete (PR #13).** **E4/T4.1 ✅** on branch `claude/e4-kyc` (worktree `.claude/worktrees/e4-kyc`,
+stacked on `claude/e3-tenancy-api` since #13 isn't merged). **144 tests** green across packages + app.
+
+### E4 progress
+- **T4.1 ✅** — `@clairtus/kyc` package: `KycProvider` interface + **Smile ID adapter** ported from the
+  live B2C `smileIdClient` (base64 HMAC `${ts}${partnerId}sid_request`; `/v1/token`; result codes
+  0810/0811/0812→VERIFIED). 9 contract tests. In `apps/b2b-api`: `kyc_checks` table + `parties.kyc_status`/
+  `kyc_result_code` (+RLS); `KycService` (createCheck/getCheck/handleCallback); `POST /v1/kyc/checks`,
+  `GET /v1/kyc/checks/:id`, **public signature-verified** `POST /v1/kyc/callback`; **KYC-gated release**
+  (base > `KYC_RELEASE_THRESHOLD` requires VERIFIED seller → 403); emits `kyc.completed`. 6 e2e tests.
+- **T4.2 (next)** — sandbox env + a `simulated` rail (deterministic success/failure triggers) + test
+  keys, with production parity asserted. Tests first.
+- **T4.3** — OpenAPI docs + quickstart + typed SDK (escrows/parties/payouts/webhook-verify).
+
+### E3 (done, PR #13) — for reference
 - **T3.1 ✅** `@clairtus/tenancy` — tenants, hashed test/live API keys, RLS (invariant #4).
 - **T3.2 ✅** `apps/b2b-api` NestJS skeleton — API-key guard, idempotency (invariant #3), error
   envelope, `/v1`, cursor pagination. Toolchain: vitest + **unplugin-swc** (Nest decorator metadata).

@@ -26,6 +26,9 @@ importers:
       '@clairtus/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@clairtus/kyc':
+        specifier: workspace:*
+        version: link:../../packages/kyc
       '@clairtus/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
@@ -90,6 +93,8 @@ importers:
       esbuild:
         specifier: ^0.24.0
         version: 0.24.2
+
+  packages/kyc: {}
 
   packages/ledger:
     dependencies:

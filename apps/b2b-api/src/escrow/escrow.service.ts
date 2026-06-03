@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -21,7 +22,7 @@ import {
 } from '@clairtus/core';
 import { Ledger, type AccountType } from '@clairtus/ledger';
 import type { PaymentRail } from '@clairtus/payments';
-import { SQL, RAIL, type SqlExecutor } from '../db/sql';
+import { SQL, RAIL, KYC_RELEASE_THRESHOLD, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
 
 export interface CreatePartyDto {
@@ -63,6 +64,7 @@ export class EscrowService {
   constructor(
     @Inject(SQL) private readonly sql: SqlExecutor,
     @Inject(RAIL) private readonly rail: PaymentRail | null,
+    @Inject(KYC_RELEASE_THRESHOLD) private readonly kycReleaseThreshold: number,
     private readonly webhooks: WebhookService,
   ) {
     this.ledger = new Ledger(sql);
@@ -81,13 +83,13 @@ export class EscrowService {
   }
 
   async getParty(tenantId: string, id: string) {
-    const { rows } = await this.sql.query<{ id: string; role: string; name: string | null; created_at: string }>(
-      `select id, role, name, created_at from parties where id = $1 and tenant_id = $2`,
+    const { rows } = await this.sql.query<{ id: string; role: string; name: string | null; kyc_status: string; kyc_result_code: string | null; created_at: string }>(
+      `select id, role, name, kyc_status, kyc_result_code, created_at from parties where id = $1 and tenant_id = $2`,
       [id, tenantId],
     );
     if (rows.length === 0) throw new NotFoundException('party not found');
     const r = rows[0]!;
-    return { id: r.id, role: r.role, name: r.name, createdAt: r.created_at };
+    return { id: r.id, role: r.role, name: r.name, kycStatus: r.kyc_status, kycResultCode: r.kyc_result_code, createdAt: r.created_at };
   }
 
   private async assertPartyExists(tenantId: string, id: string, label: string): Promise<void> {
@@ -150,6 +152,19 @@ export class EscrowService {
     const e = await this.loadEscrow(tenantId, id);
     const event: EscrowEventType = e.status === 'DISPUTED' ? 'RESOLVE_RELEASE' : 'RELEASE';
     const status = this.transition(e.status, event);
+
+    // KYC gate: higher-ticket releases require a VERIFIED seller (compliance step-up).
+    if (this.kycReleaseThreshold > 0 && num(e.base_amount) > this.kycReleaseThreshold) {
+      const k = await this.sql.query<{ kyc_status: string }>(
+        `select kyc_status from parties where id = $1 and tenant_id = $2`,
+        [e.seller_party_id, tenantId],
+      );
+      if (k.rows[0]?.kyc_status !== 'VERIFIED') {
+        throw new ForbiddenException(
+          `seller KYC verification required to release above ${this.kycReleaseThreshold} (minor units)`,
+        );
+      }
+    }
 
     const breakdown = this.breakdown(e);
     const accounts = {
