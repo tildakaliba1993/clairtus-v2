@@ -3,11 +3,21 @@ import type { SqlExecutor } from '@clairtus/tenancy';
 /** DI token for the database executor (pglite in tests, Postgres adapter in prod). */
 export const SQL = 'SQL_EXECUTOR';
 
-/** DI token for the payout rail (a PaymentRail, or null when payouts only post to the ledger). */
+/** DI token for the LIVE payout rail (a PaymentRail, or null when payouts only post to the ledger). */
 export const RAIL = 'PAYMENT_RAIL';
+
+/** DI token for the sandbox rail used by test-mode keys (deterministic, no network). */
+export const SIMULATED_RAIL = 'SIMULATED_RAIL';
 
 /** DI token for the fetch implementation used to deliver outbound webhooks (overridable in tests). */
 export const FETCH = 'FETCH_IMPL';
+
+/** DI token for the KYC provider (a KycProvider, or null when KYC is not configured). */
+export const KYC_PROVIDER = 'KYC_PROVIDER';
+/** DI token for the URL Smile ID posts verification results to. */
+export const KYC_CALLBACK_URL = 'KYC_CALLBACK_URL';
+/** DI token: releases whose base amount exceeds this (minor units) require a VERIFIED seller. */
+export const KYC_RELEASE_THRESHOLD = 'KYC_RELEASE_THRESHOLD';
 
 export type { SqlExecutor };
 

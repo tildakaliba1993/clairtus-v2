@@ -12,6 +12,11 @@ export class EscrowController {
     return this.svc.createEscrow(t.tenantId, body);
   }
 
+  @Get()
+  list(@CurrentTenant() t: AuthContext) {
+    return this.svc.listEscrows(t.tenantId);
+  }
+
   @Get(':id')
   get(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
     return this.svc.getEscrow(t.tenantId, id);

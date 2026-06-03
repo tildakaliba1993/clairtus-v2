@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -21,7 +22,8 @@ import {
 } from '@clairtus/core';
 import { Ledger, type AccountType } from '@clairtus/ledger';
 import type { PaymentRail } from '@clairtus/payments';
-import { SQL, RAIL, type SqlExecutor } from '../db/sql';
+import type { ApiKeyMode } from '@clairtus/tenancy';
+import { SQL, RAIL, SIMULATED_RAIL, KYC_RELEASE_THRESHOLD, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
 
 export interface CreatePartyDto {
@@ -45,6 +47,8 @@ export interface CreatePayoutDto {
   escrowId: string;
   recipientPartyId: string;
   amount: number;
+  /** Sandbox only: { simulate: 'succeeded' | 'failed' | 'pending' } drives the simulated rail. */
+  metadata?: Record<string, unknown>;
 }
 
 interface EscrowRow {
@@ -63,6 +67,8 @@ export class EscrowService {
   constructor(
     @Inject(SQL) private readonly sql: SqlExecutor,
     @Inject(RAIL) private readonly rail: PaymentRail | null,
+    @Inject(SIMULATED_RAIL) private readonly simulatedRail: PaymentRail | null,
+    @Inject(KYC_RELEASE_THRESHOLD) private readonly kycReleaseThreshold: number,
     private readonly webhooks: WebhookService,
   ) {
     this.ledger = new Ledger(sql);
@@ -81,13 +87,13 @@ export class EscrowService {
   }
 
   async getParty(tenantId: string, id: string) {
-    const { rows } = await this.sql.query<{ id: string; role: string; name: string | null; created_at: string }>(
-      `select id, role, name, created_at from parties where id = $1 and tenant_id = $2`,
+    const { rows } = await this.sql.query<{ id: string; role: string; name: string | null; kyc_status: string; kyc_result_code: string | null; created_at: string }>(
+      `select id, role, name, kyc_status, kyc_result_code, created_at from parties where id = $1 and tenant_id = $2`,
       [id, tenantId],
     );
     if (rows.length === 0) throw new NotFoundException('party not found');
     const r = rows[0]!;
-    return { id: r.id, role: r.role, name: r.name, createdAt: r.created_at };
+    return { id: r.id, role: r.role, name: r.name, kycStatus: r.kyc_status, kycResultCode: r.kyc_result_code, createdAt: r.created_at };
   }
 
   private async assertPartyExists(tenantId: string, id: string, label: string): Promise<void> {
@@ -151,6 +157,19 @@ export class EscrowService {
     const event: EscrowEventType = e.status === 'DISPUTED' ? 'RESOLVE_RELEASE' : 'RELEASE';
     const status = this.transition(e.status, event);
 
+    // KYC gate: higher-ticket releases require a VERIFIED seller (compliance step-up).
+    if (this.kycReleaseThreshold > 0 && num(e.base_amount) > this.kycReleaseThreshold) {
+      const k = await this.sql.query<{ kyc_status: string }>(
+        `select kyc_status from parties where id = $1 and tenant_id = $2`,
+        [e.seller_party_id, tenantId],
+      );
+      if (k.rows[0]?.kyc_status !== 'VERIFIED') {
+        throw new ForbiddenException(
+          `seller KYC verification required to release above ${this.kycReleaseThreshold} (minor units)`,
+        );
+      }
+    }
+
     const breakdown = this.breakdown(e);
     const accounts = {
       external: await this.account(tenantId, 'external', e.currency, null),
@@ -204,7 +223,7 @@ export class EscrowService {
 
   // ---- payouts -----------------------------------------------------------
 
-  async createPayout(tenantId: string, dto: CreatePayoutDto) {
+  async createPayout(tenantId: string, dto: CreatePayoutDto, mode: ApiKeyMode = 'live') {
     if (!Number.isInteger(dto.amount) || dto.amount <= 0) throw new BadRequestException('amount must be a positive integer');
     const escrow = await this.loadEscrow(tenantId, dto.escrowId);
     await this.assertPartyExists(tenantId, dto.recipientPartyId, 'recipient');
@@ -223,37 +242,45 @@ export class EscrowService {
     );
     const payoutId = ins.rows[0]!.id;
 
-    await this.ledger.post(
-      buildPayoutPosting({
-        tenantId, reference: `payout:${payoutId}`, currency: escrow.currency, escrowId: dto.escrowId,
-        amount: dto.amount, recipientAccount, externalAccount: external,
-      }),
-    );
+    // Sandbox parity: test-mode keys disburse through the simulated rail; live keys through the real rail.
+    const rail = mode === 'live' ? this.rail : this.simulatedRail;
 
-    let rail: string | null = null;
+    let railId: string | null = null;
     let railRef: string | null = null;
     let status = 'pending';
-    if (this.rail) {
+    if (rail) {
       const party = await this.sql.query<{ account_ref: string | null; bank_code: string | null; name: string | null }>(
         `select account_ref, bank_code, name from parties where id = $1 and tenant_id = $2`,
         [dto.recipientPartyId, tenantId],
       );
       const p = party.rows[0]!;
-      const res = await this.rail.initiatePayout({
+      const res = await rail.initiatePayout({
         reference: payoutId, amount: dto.amount, currency: escrow.currency, country: '',
         method: 'bank_transfer',
         recipient: { accountRef: p.account_ref ?? undefined, bankCode: p.bank_code ?? undefined, name: p.name ?? undefined },
+        metadata: dto.metadata,
       });
-      rail = this.rail.id; railRef = res.railRef; status = res.status;
+      railId = rail.id; railRef = res.railRef; status = res.status;
       await this.sql.query(`update payouts set rail = $1, rail_ref = $2, status = $3 where id = $4 and tenant_id = $5`,
-        [rail, railRef, status, payoutId, tenantId]);
+        [railId, railRef, status, payoutId, tenantId]);
     }
+
+    // A FAILED disbursement must not move funds out of the recipient balance.
+    if (status !== 'failed') {
+      await this.ledger.post(
+        buildPayoutPosting({
+          tenantId, reference: `payout:${payoutId}`, currency: escrow.currency, escrowId: dto.escrowId,
+          amount: dto.amount, recipientAccount, externalAccount: external,
+        }),
+      );
+    }
+
     await this.webhooks.emit(tenantId, {
       type: status === 'failed' ? 'payout.failed' : 'payout.succeeded',
       escrowId: dto.escrowId,
       data: { payoutId, amount: dto.amount, railRef },
     });
-    return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail, railRef, status, createdAt: ins.rows[0]!.created_at };
+    return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail: railId, railRef, status, createdAt: ins.rows[0]!.created_at };
   }
 
   async getPayout(tenantId: string, id: string) {
@@ -292,6 +319,30 @@ export class EscrowService {
       [tenantId, limit],
     );
     return { data: rows.map((r: any) => ({ id: r.id, accountId: r.account_id, direction: r.direction, amount: num(r.amount), reference: r.reference, escrowId: r.escrow_id, createdAt: r.created_at })) };
+  }
+
+  // ---- lists -------------------------------------------------------------
+
+  async listEscrows(tenantId: string, limit = 50) {
+    const { rows } = await this.sql.query<EscrowRow>(
+      `select * from escrows where tenant_id = $1 order by created_at desc, id desc limit $2`,
+      [tenantId, limit],
+    );
+    return { data: rows.map((r) => this.toEscrowDto(r)) };
+  }
+
+  async listPayouts(tenantId: string, limit = 50) {
+    const { rows } = await this.sql.query<Record<string, unknown>>(
+      `select id, escrow_id, recipient_party_id, amount, currency, rail, rail_ref, status, created_at
+       from payouts where tenant_id = $1 order by created_at desc, id desc limit $2`,
+      [tenantId, limit],
+    );
+    return {
+      data: rows.map((r: any) => ({
+        id: r.id, escrowId: r.escrow_id, recipientPartyId: r.recipient_party_id, amount: num(r.amount),
+        currency: r.currency, rail: r.rail, railRef: r.rail_ref, status: r.status, createdAt: r.created_at,
+      })),
+    };
   }
 
   // ---- internals ---------------------------------------------------------

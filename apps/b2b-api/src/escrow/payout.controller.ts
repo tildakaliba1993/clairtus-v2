@@ -9,7 +9,12 @@ export class PayoutController {
 
   @Post()
   create(@CurrentTenant() t: AuthContext, @Body() body: CreatePayoutDto) {
-    return this.svc.createPayout(t.tenantId, body);
+    return this.svc.createPayout(t.tenantId, body, t.mode);
+  }
+
+  @Get()
+  list(@CurrentTenant() t: AuthContext) {
+    return this.svc.listPayouts(t.tenantId);
   }
 
   @Get(':id')

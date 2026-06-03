@@ -38,8 +38,12 @@ bootstrapped/cash-minimal.
 | **E1** Ledger + lifecycle + compliance | ✅ Merged (PR #11) |
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
 | **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
-| E4 KYC + sandbox + docs + SDK | ⬜ |
-| E5 Dashboard + hardening + onboarding | ⬜ |
+| **E4** KYC + sandbox + docs + SDK | ✅ Complete (PR open) — T4.1 KYC · T4.2 sandbox/simulated rail · T4.3 OpenAPI + typed SDK + quickstart |
+| **E5** Dashboard + hardening + onboarding | ✅ Complete (PR open) — T5.1 dashboard · T5.2 hardening · T5.3 onboarding kit |
+
+**🎉 MVP (E0–E5) feature-complete.** 188 tests green. Remaining is the tracked carry-forwards
+(prod Postgres adapter + migrations, webhook cron, Korapay Live IP/custody sign-off, OTel exporter)
+and operational milestones (≥1 partner in sandbox, ≥1 live pilot).
 
 ### Packages built (all green; ~104 tests)
 - `@clairtus/shared` — Money (integer minor units) + arithmetic + applyBps.
@@ -64,8 +68,70 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E4 — KYC + sandbox + docs + SDK
-**E3 is COMPLETE** (branch `claude/e3-tenancy-api`, PR open). 129 tests green across packages + app.
+## NEXT: merge the stack, then carry-forwards / pilot
+**E0–E5 COMPLETE.** Three stacked PRs — merge order **#13 (E3) → #14 (E4) → E5 PR**. Then the
+carry-forwards (prod Postgres adapter + `infra/` migrations, webhook `processDue` cron, Korapay Live
+egress-IP + custody (b)/(d) sign-off, OTel exporter) and the design-partner pilot.
+Branch `claude/e5-dashboard` (worktree `.claude/worktrees/e5-dashboard`, stacked on `claude/e4-kyc`).
+**188 tests** green across 12 workspaces.
+
+### E5 progress
+- **T5.1 ✅** — `apps/client-dashboard` (Next 16 / React 19 / Tailwind v4, **matching the
+  website/admin design system**: brand green `hsl(153 60% 53%)`, Red Hat Display, slate shell).
+  Cookie-based API-key connect (`/api/connect` validates via SDK + httpOnly cookie; `/connect`,
+  disconnect); pages: overview (balances + recent escrows), escrows list + detail, payouts,
+  webhook deliveries; sandbox/live `ModeBadge` from the key prefix. Server components use
+  `@clairtus/sdk` (key never reaches the browser). Added API list endpoints `GET /v1/escrows`,
+  `GET /v1/payouts` + SDK `escrows.list()/payouts.list()/webhookDeliveries.list()`.
+  Tests: format + 4 components (RTL) = 10; **`next build` passes** (9 routes). Toolchain: vitest +
+  @vitejs/plugin-react + jsdom (Next server wiring is thin; lib + components are the tested core).
+- **T5.2 ✅** — reliability hardening (3 mechanisms, tested):
+  - **Circuit breaker + failover** in `RailRouter` (`packages/payments`): `CircuitBreaker`
+    (closed/open/half-open) per rail; `router.run()` fails over and skips open rails, re-trying
+    after cooldown. `breakerState(id)` for observability.
+  - **Durable queue + DLQ** (`@clairtus/queue`): `JobQueue` over SqlExecutor — enqueue/claim/
+    complete/fail with exponential backoff; dead-letters after max attempts. pglite-tested.
+  - **Structured logs + correlation IDs** (`@clairtus/observability`): JSON logger that stamps the
+    current correlation id (AsyncLocalStorage, propagates across awaits) — the seam for an OTel
+    exporter. `correlationMiddleware` wired into b2b-api (`X-Request-Id` echoed/generated).
+  - *Integration follow-ups:* route the API's payout path through `router.run` (currently a single
+    mode-selected rail); move webhook/payout retries onto `@clairtus/queue` (webhook has its own
+    retry today); attach an OpenTelemetry exporter to the logger/correlation seam.
+- **T5.3 ✅** — onboarding kit: tested `onboardTenant()` (`apps/b2b-api/src/onboarding/onboard.ts`)
+  composing Tenancy + WebhookService → tenant + test/live keys + webhook endpoint (2 tests);
+  `PartnerConfig` type; **`docs/ONBOARDING.md`** runbook (outreach → sandbox sign-off → go-live
+  checklist → pilot). Operational "done" (≥1 partner sandbox, ≥1 live pilot) is the co-founder track.
+
+> To view the dashboard live you need the API running with a real Postgres adapter (carry-forward #1)
+> + `CLAIRTUS_API_URL`; then `next dev` and connect with a `ck_test_…` key.
+
+### E4 progress
+- **T4.1 ✅** — `@clairtus/kyc` package: `KycProvider` interface + **Smile ID adapter** ported from the
+  live B2C `smileIdClient` (base64 HMAC `${ts}${partnerId}sid_request`; `/v1/token`; result codes
+  0810/0811/0812→VERIFIED). 9 contract tests. In `apps/b2b-api`: `kyc_checks` table + `parties.kyc_status`/
+  `kyc_result_code` (+RLS); `KycService` (createCheck/getCheck/handleCallback); `POST /v1/kyc/checks`,
+  `GET /v1/kyc/checks/:id`, **public signature-verified** `POST /v1/kyc/callback`; **KYC-gated release**
+  (base > `KYC_RELEASE_THRESHOLD` requires VERIFIED seller → 403); emits `kyc.completed`. 6 e2e tests.
+- **T4.2 ✅** — `SimulatedRail` in `@clairtus/payments` (deterministic via `metadata.simulate`:
+  succeeded/failed/pending; same `PaymentRail` interface = parity). b2b-api routes payouts by API-key
+  **mode**: test→simulated rail, live→real rail (`SIMULATED_RAIL` token, always provided). Payout is now
+  **rail-first**: a failed disbursement does NOT post to the ledger (recipient keeps their balance).
+  e2e: test-key payout via simulated rail debits recipient; `simulate:'failed'` fails w/o moving funds; live parity.
+- **T4.3 ✅** — `@clairtus/sdk` typed client (escrows/parties/payouts/kyc/balances/ledger/webhook-endpoints
+  + `verifyWebhookSignature`; injected fetch; `ClairtusApiError`), 5 unit tests. `@nestjs/swagger` OpenAPI
+  doc served at `/docs` (`buildOpenApiConfig`); spec-paths test. SDK integration test drives the full
+  lifecycle over real HTTP against the app on an ephemeral port. `docs/QUICKSTART.md` mirrors that flow.
+  *Follow-up:* enrich OpenAPI request/response schemas (DTOs are interfaces → bodies are thin; the typed
+  SDK is the authoritative payload reference for now).
+
+### E5 tasks (from IMPLEMENTATION_PLAN)
+- **T5.1** minimal client dashboard (Next.js): API keys, escrows list/detail, balances, payout status,
+  webhook delivery log, sandbox toggle. *(This is the first user-facing UI; design system applies here.)*
+- **T5.2** observability + reliability hardening (structured logs + correlation IDs + OTel; durable
+  queue + DLQ for pay-in/payout/webhooks; per-rail circuit breakers in the router).
+- **T5.3** design-partner onboarding kit (manual tenant onboarding runbook; per-partner config).
+
+### E3 (done, PR #13) — for reference
 - **T3.1 ✅** `@clairtus/tenancy` — tenants, hashed test/live API keys, RLS (invariant #4).
 - **T3.2 ✅** `apps/b2b-api` NestJS skeleton — API-key guard, idempotency (invariant #3), error
   envelope, `/v1`, cursor pagination. Toolchain: vitest + **unplugin-swc** (Nest decorator metadata).
