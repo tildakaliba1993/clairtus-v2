@@ -6,6 +6,9 @@ export const SQL = 'SQL_EXECUTOR';
 /** DI token for the payout rail (a PaymentRail, or null when payouts only post to the ledger). */
 export const RAIL = 'PAYMENT_RAIL';
 
+/** DI token for the fetch implementation used to deliver outbound webhooks (overridable in tests). */
+export const FETCH = 'FETCH_IMPL';
+
 export type { SqlExecutor };
 
 /** Idempotency ledger: one row per (tenant, Idempotency-Key) — caches the response. */

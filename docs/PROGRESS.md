@@ -37,7 +37,7 @@ bootstrapped/cash-minimal.
 | **E0** Monorepo + escrow core | ✅ Merged (PR #10) |
 | **E1** Ledger + lifecycle + compliance | ✅ Merged (PR #11) |
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
-| **E3** Multi-tenancy + B2B API | 🟡 In progress — **T3.1 ✅** (tenancy) + **T3.2 ✅** (NestJS skeleton) + **T3.3 ✅** (escrow/party/payout endpoints, full lifecycle via API); T3.4 (webhooks) ⬜ |
+| **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
 | E4 KYC + sandbox + docs + SDK | ⬜ |
 | E5 Dashboard + hardening + onboarding | ⬜ |
 
@@ -64,25 +64,29 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E3 / T3.4 — outbound signed webhooks (last E3 task, then open the E3 PR)
-Branch `claude/e3-tenancy-api` (worktree `.claude/worktrees/e3-tenancy-api`), off main after PR #12.
-- **T3.1 ✅** — `@clairtus/tenancy` (tenants, hashed test/live API keys, RLS isolation; 10 tests).
-- **T3.2 ✅** — `apps/b2b-api` NestJS skeleton: API-key guard → `Tenancy.authenticate` (`@Public()`
-  exempts health); `IdempotencyInterceptor` → `idempotency_keys` (invariant #3, 409 on key reuse);
-  `HttpErrorFilter` envelope `{error:{code,message,statusCode}}`; `/v1` prefix; cursor pagination.
-  **Toolchain:** vitest + **unplugin-swc** (esbuild won't emit Nest decorator metadata).
-- **T3.3 ✅** — `EscrowService` wires core + ledger + rail behind REST (18 tests total):
-  `POST/GET /v1/escrows` + `/fund /release /refund /cancel /dispute`, `/v1/parties`, `/v1/payouts`,
-  `/v1/balances`, `/v1/ledger`. Domain schema (parties/escrows/payouts) + `tenantRlsSql` on each;
-  service scopes every query by tenant_id (the tested isolation; RLS is the DB backstop). Full
-  lifecycle proven via API with balances reconciling to **0**; cross-tenant→404, illegal txn→409,
-  over-payout→422. Payout rail injected via `RAIL` token (fake rail in tests).
-- **T3.4 (next)** — outbound signed webhooks: HMAC(body+timestamp) signature, retry-with-backoff
-  delivery, `webhook_endpoints` + `webhook_deliveries`, event catalog, delivery log + replay.
-  Emit on every lifecycle transition (the core already returns domain events). Tests first.
-  **Then open the single E3 PR.**
-- Production notes: (1) wire a real Postgres `SqlExecutor` + run schema as versioned `infra/` migrations
-  (tests use `applyAllSchema`); (2) payouts need a static egress IP whitelisted in Korapay **Live** mode.
+## NEXT: E4 — KYC + sandbox + docs + SDK
+**E3 is COMPLETE** (branch `claude/e3-tenancy-api`, PR open). 129 tests green across packages + app.
+- **T3.1 ✅** `@clairtus/tenancy` — tenants, hashed test/live API keys, RLS (invariant #4).
+- **T3.2 ✅** `apps/b2b-api` NestJS skeleton — API-key guard, idempotency (invariant #3), error
+  envelope, `/v1`, cursor pagination. Toolchain: vitest + **unplugin-swc** (Nest decorator metadata).
+- **T3.3 ✅** REST endpoints over core+ledger+rail: escrows (create/get/fund/release/refund/cancel/
+  dispute), parties, payouts, balances, ledger. Per-table `tenantRlsSql` + service-layer tenant
+  scoping. Full lifecycle via API, balances reconcile to 0; cross-tenant→404, illegal txn→409, over-payout→422.
+- **T3.4 ✅** outbound signed webhooks — HMAC(`t.body`) `X-Clairtus-Signature`, retry w/ exp backoff
+  (`processDue`), `events`/`webhook_endpoints`/`webhook_deliveries`, replay endpoint, event catalog;
+  emitted on every lifecycle transition (best-effort, never fails the API call).
+
+### Carry-forward TODOs (not blocking E4)
+1. **Wire a real Postgres `SqlExecutor`** for `apps/b2b-api` (tests use pglite + `applyAllSchema`);
+   turn `applyAllSchema` into versioned `infra/` migrations. `UNCONFIGURED_SQL` throws until wired.
+2. A **retry worker/cron** should call `WebhookService.processDue` periodically (only manual/processDue today).
+3. Payouts need a **static egress IP whitelisted in Korapay Live mode** (from T2.3); confirm Korapay
+   custody (b) no-auto-sweep + (d) segregation in writing.
+
+### E4 tasks (from IMPLEMENTATION_PLAN)
+- **T4.1** KYC provider abstraction + Smile ID adapter + `POST /v1/kyc/checks`; status gates higher-ticket release.
+- **T4.2** sandbox env + `simulated` rail (deterministic outcomes) + test keys; parity.
+- **T4.3** OpenAPI docs + quickstart + typed SDK (escrows/parties/payouts/webhook-verify).
 
 ---
 

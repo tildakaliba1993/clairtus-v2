@@ -22,6 +22,7 @@ import {
 import { Ledger, type AccountType } from '@clairtus/ledger';
 import type { PaymentRail } from '@clairtus/payments';
 import { SQL, RAIL, type SqlExecutor } from '../db/sql';
+import { WebhookService } from '../webhooks/webhook.service';
 
 export interface CreatePartyDto {
   role: string;
@@ -62,6 +63,7 @@ export class EscrowService {
   constructor(
     @Inject(SQL) private readonly sql: SqlExecutor,
     @Inject(RAIL) private readonly rail: PaymentRail | null,
+    private readonly webhooks: WebhookService,
   ) {
     this.ledger = new Ledger(sql);
   }
@@ -140,6 +142,7 @@ export class EscrowService {
       }),
     );
     await this.setStatus(tenantId, id, status);
+    await this.webhooks.emit(tenantId, { type: 'escrow.funded', escrowId: id, data: { depositAmount: breakdown.depositAmount.amount } });
     return { ...(await this.getEscrow(tenantId, id)), depositAmount: breakdown.depositAmount.amount };
   }
 
@@ -162,6 +165,7 @@ export class EscrowService {
       buildReleasePosting({ tenantId, reference: `release:${id}`, currency: e.currency, escrowId: id, breakdown, accounts }),
     );
     await this.setStatus(tenantId, id, status);
+    await this.webhooks.emit(tenantId, { type: 'escrow.released', escrowId: id, data: { primaryNet: breakdown.primaryNet.amount, revenue: breakdown.platformRevenue.amount } });
     return this.getEscrow(tenantId, id);
   }
 
@@ -180,18 +184,21 @@ export class EscrowService {
       }),
     );
     await this.setStatus(tenantId, id, status);
+    await this.webhooks.emit(tenantId, { type: 'escrow.refunded', escrowId: id, data: { depositAmount: breakdown.depositAmount.amount } });
     return this.getEscrow(tenantId, id);
   }
 
   async cancel(tenantId: string, id: string) {
     const e = await this.loadEscrow(tenantId, id);
     await this.setStatus(tenantId, id, this.transition(e.status, 'CANCEL'));
+    await this.webhooks.emit(tenantId, { type: 'escrow.cancelled', escrowId: id });
     return this.getEscrow(tenantId, id);
   }
 
   async dispute(tenantId: string, id: string) {
     const e = await this.loadEscrow(tenantId, id);
     await this.setStatus(tenantId, id, this.transition(e.status, 'OPEN_DISPUTE'));
+    await this.webhooks.emit(tenantId, { type: 'escrow.disputed', escrowId: id });
     return this.getEscrow(tenantId, id);
   }
 
@@ -241,6 +248,11 @@ export class EscrowService {
       await this.sql.query(`update payouts set rail = $1, rail_ref = $2, status = $3 where id = $4 and tenant_id = $5`,
         [rail, railRef, status, payoutId, tenantId]);
     }
+    await this.webhooks.emit(tenantId, {
+      type: status === 'failed' ? 'payout.failed' : 'payout.succeeded',
+      escrowId: dto.escrowId,
+      data: { payoutId, amount: dto.amount, railRef },
+    });
     return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail, railRef, status, createdAt: ins.rows[0]!.created_at };
   }
 

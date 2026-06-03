@@ -51,15 +51,54 @@ create table if not exists payouts (
 );
 `;
 
+/** Domain events + outbound webhook delivery (signed, retried, replayable). */
+export const WEBHOOK_SCHEMA = `
+create table if not exists events (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  escrow_id uuid,
+  type text not null,
+  data jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists webhook_endpoints (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  url text not null,
+  signing_secret text not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists webhook_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  endpoint_id uuid not null,
+  event_id uuid not null,
+  event_type text not null,
+  payload jsonb not null,
+  status text not null default 'pending',
+  attempts int not null default 0,
+  max_attempts int not null default 5,
+  next_retry_at timestamptz,
+  last_error text,
+  created_at timestamptz not null default now(),
+  delivered_at timestamptz
+);
+
+create index if not exists webhook_deliveries_due_idx on webhook_deliveries(status, next_retry_at);
+`;
+
 /** Tenant-scoped tables that get the RLS isolation policy. */
-export const RLS_TABLES = ['parties', 'escrows', 'payouts'] as const;
+export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries'] as const;
 
 /**
  * Applies the full schema (tenancy + ledger + idempotency + domain + RLS). Used by tests;
  * production runs the equivalent versioned migrations under infra/.
  */
 export async function applyAllSchema(sql: SqlExecutor): Promise<void> {
-  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA];
+  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA];
   for (const block of blocks) {
     for (const stmt of block.split(';').map((s) => s.trim()).filter(Boolean)) {
       await sql.query(stmt);
