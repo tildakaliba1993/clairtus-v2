@@ -321,6 +321,30 @@ export class EscrowService {
     return { data: rows.map((r: any) => ({ id: r.id, accountId: r.account_id, direction: r.direction, amount: num(r.amount), reference: r.reference, escrowId: r.escrow_id, createdAt: r.created_at })) };
   }
 
+  // ---- lists -------------------------------------------------------------
+
+  async listEscrows(tenantId: string, limit = 50) {
+    const { rows } = await this.sql.query<EscrowRow>(
+      `select * from escrows where tenant_id = $1 order by created_at desc, id desc limit $2`,
+      [tenantId, limit],
+    );
+    return { data: rows.map((r) => this.toEscrowDto(r)) };
+  }
+
+  async listPayouts(tenantId: string, limit = 50) {
+    const { rows } = await this.sql.query<Record<string, unknown>>(
+      `select id, escrow_id, recipient_party_id, amount, currency, rail, rail_ref, status, created_at
+       from payouts where tenant_id = $1 order by created_at desc, id desc limit $2`,
+      [tenantId, limit],
+    );
+    return {
+      data: rows.map((r: any) => ({
+        id: r.id, escrowId: r.escrow_id, recipientPartyId: r.recipient_party_id, amount: num(r.amount),
+        currency: r.currency, rail: r.rail, railRef: r.rail_ref, status: r.status, createdAt: r.created_at,
+      })),
+    };
+  }
+
   // ---- internals ---------------------------------------------------------
 
   private async loadEscrow(tenantId: string, id: string): Promise<EscrowRow> {

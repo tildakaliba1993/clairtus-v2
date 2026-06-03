@@ -39,7 +39,7 @@ bootstrapped/cash-minimal.
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
 | **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
 | **E4** KYC + sandbox + docs + SDK | ✅ Complete (PR open) — T4.1 KYC · T4.2 sandbox/simulated rail · T4.3 OpenAPI + typed SDK + quickstart |
-| E5 Dashboard + hardening + onboarding | ⬜ |
+| **E5** Dashboard + hardening + onboarding | 🟡 In progress — **T5.1 ✅** (client dashboard, design-system-matched); T5.2 (observability/hardening) / T5.3 (onboarding kit) ⬜ |
 
 ### Packages built (all green; ~104 tests)
 - `@clairtus/shared` — Money (integer minor units) + arithmetic + applyBps.
@@ -64,9 +64,27 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E5 — dashboard, hardening & onboarding
-**E3 complete (PR #13). E4 COMPLETE** (branch `claude/e4-kyc`, PR open; stacked on E3 until #13 merges).
-**160 tests** green across packages + app. Merge order: **#13 (E3) → E4 PR → E5**.
+## NEXT: E5 / T5.2 — observability + reliability hardening
+**E3 (PR #13) + E4 (PR #14) complete. E5/T5.1 ✅** on branch `claude/e5-dashboard` (worktree
+`.claude/worktrees/e5-dashboard`, stacked on `claude/e4-kyc`). **170 tests** green.
+Merge order: **#13 (E3) → #14 (E4) → E5 PR**.
+
+### E5 progress
+- **T5.1 ✅** — `apps/client-dashboard` (Next 16 / React 19 / Tailwind v4, **matching the
+  website/admin design system**: brand green `hsl(153 60% 53%)`, Red Hat Display, slate shell).
+  Cookie-based API-key connect (`/api/connect` validates via SDK + httpOnly cookie; `/connect`,
+  disconnect); pages: overview (balances + recent escrows), escrows list + detail, payouts,
+  webhook deliveries; sandbox/live `ModeBadge` from the key prefix. Server components use
+  `@clairtus/sdk` (key never reaches the browser). Added API list endpoints `GET /v1/escrows`,
+  `GET /v1/payouts` + SDK `escrows.list()/payouts.list()/webhookDeliveries.list()`.
+  Tests: format + 4 components (RTL) = 10; **`next build` passes** (9 routes). Toolchain: vitest +
+  @vitejs/plugin-react + jsdom (Next server wiring is thin; lib + components are the tested core).
+- **T5.2 (next)** — structured logs + correlation IDs + OpenTelemetry; durable queue + DLQ for
+  pay-in/payout/webhooks; per-rail circuit breakers in the router. Tests first.
+- **T5.3** — design-partner onboarding kit (manual tenant onboarding runbook; per-partner config).
+
+> To view the dashboard live you need the API running with a real Postgres adapter (carry-forward #1)
+> + `CLAIRTUS_API_URL`; then `next dev` and connect with a `ck_test_…` key.
 
 ### E4 progress
 - **T4.1 ✅** — `@clairtus/kyc` package: `KycProvider` interface + **Smile ID adapter** ported from the

@@ -74,6 +74,12 @@ describe('@clairtus/sdk against the live API', () => {
     const balances = (await sdk.balances()) as { data: { type: string; ownerRef: string | null; balance: number }[] };
     const recip = balances.data.find((a) => a.type === 'recipient_payable' && a.ownerRef === seller.id);
     expect(recip?.balance).toBe(0);
+
+    // List endpoints (dashboard feeds) surface the escrow + payout.
+    const escrowList = (await sdk.escrows.list()) as { data: { id: string; status: string }[] };
+    expect(escrowList.data.some((e) => e.id === escrow.id && e.status === 'RELEASED')).toBe(true);
+    const payoutList = (await sdk.payouts.list()) as { data: { id: string }[] };
+    expect(payoutList.data.some((p) => p.id === payout.id)).toBe(true);
   });
 
   it('surfaces API errors as ClairtusApiError (release before fund → 409)', async () => {

@@ -86,6 +86,7 @@ export class ClairtusClient {
 
   readonly escrows = {
     create: (input: CreateEscrowInput, opts?: RequestOptions) => this.request('POST', '/escrows', input, opts),
+    list: () => this.request('GET', '/escrows'),
     get: (id: string) => this.request('GET', `/escrows/${id}`),
     fund: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/fund`, {}, opts),
     release: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/release`, {}, opts),
@@ -96,6 +97,7 @@ export class ClairtusClient {
 
   readonly payouts = {
     create: (input: CreatePayoutInput, opts?: RequestOptions) => this.request('POST', '/payouts', input, opts),
+    list: () => this.request('GET', '/payouts'),
     get: (id: string) => this.request('GET', `/payouts/${id}`),
   };
 
@@ -106,6 +108,11 @@ export class ClairtusClient {
 
   readonly webhookEndpoints = {
     create: (input: { url: string }) => this.request('POST', '/webhook-endpoints', input),
+  };
+
+  readonly webhookDeliveries = {
+    list: () => this.request('GET', '/webhook-deliveries'),
+    replay: (id: string) => this.request('POST', `/webhook-deliveries/${id}/replay`, {}),
   };
 
   balances = () => this.request('GET', '/balances');
