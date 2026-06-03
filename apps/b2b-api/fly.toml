@@ -1,0 +1,31 @@
+# Fly.io config for the B2B Escrow API. Deploy from repo root:
+#   fly deploy --config apps/b2b-api/fly.toml
+app = "clairtus-api"
+primary_region = "jnb"  # Johannesburg — closest to SA design partners
+
+[build]
+  dockerfile = "apps/b2b-api/Dockerfile"
+
+[env]
+  PORT = "3000"
+  NODE_ENV = "production"
+  # Supabase transaction pooler (pgBouncer) requires prepared statements OFF (the default here).
+  # Non-secret config only — secrets are set via `fly secrets set` (see docs/DEPLOYMENT.md).
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1  # keep 1 warm so the webhook context + pool stay hot
+
+[[http_service.checks]]
+  method = "GET"
+  path = "/v1/health"
+  interval = "15s"
+  timeout = "2s"
+  grace_period = "10s"
+
+# Run DB migrations once per release, before the new version takes traffic.
+[deploy]
+  release_command = "corepack pnpm --filter @clairtus/b2b-api migrate"

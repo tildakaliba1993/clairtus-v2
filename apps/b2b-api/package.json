@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node --import tsx src/main.ts",
+    "migrate": "node --import tsx scripts/migrate.ts",
+    "webhook-worker": "node --import tsx scripts/webhook-worker.ts"
   },
   "dependencies": {
     "@clairtus/core": "workspace:*",
@@ -13,14 +16,17 @@
     "@clairtus/ledger": "workspace:*",
     "@clairtus/observability": "workspace:*",
     "@clairtus/payments": "workspace:*",
+    "@clairtus/queue": "workspace:*",
     "@clairtus/shared": "workspace:*",
     "@clairtus/tenancy": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
+    "postgres": "^3.4.5",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@clairtus/sdk": "workspace:*",
