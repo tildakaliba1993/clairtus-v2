@@ -36,12 +36,12 @@ bootstrapped/cash-minimal.
 |---|---|
 | **E0** Monorepo + escrow core | ✅ Merged (PR #10) |
 | **E1** Ledger + lifecycle + compliance | ✅ Merged (PR #11) |
-| **E2** Payment-rail abstraction | 🟡 In progress — T2.1 ✅, T2.2 ✅, **T2.3 adapter ✅ + custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay sign-off** |
-| E3 Multi-tenancy + B2B API | ⬜ Not started |
+| **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
+| **E3** Multi-tenancy + B2B API | 🟡 In progress — **T3.1 ✅** (tenancy: tenants + API keys + RLS); T3.2 (NestJS skeleton) / T3.3 (endpoints) / T3.4 (webhooks) ⬜ |
 | E4 KYC + sandbox + docs + SDK | ⬜ |
 | E5 Dashboard + hardening + onboarding | ⬜ |
 
-### Packages built (all green; ~77 tests)
+### Packages built (all green; ~104 tests)
 - `@clairtus/shared` — Money (integer minor units) + arithmetic + applyBps.
 - `@clairtus/core` — fee/split engine (`computeFeeBreakdown`), escrow state machine
   (`applyEscrowEvent`), escrow→ledger posting builders (`escrowLedger.ts`).
@@ -52,6 +52,9 @@ bootstrapped/cash-minimal.
 - `@clairtus/payments` — `PaymentRail` interface + `NormalizedEvent` + `RailRouter`
   (config-driven, enable/disable, failover) + **PawaPay adapter** (DRC mobile money)
   + **Korapay adapter** (SA/NG pay-in + payout-from-balance, webhook HMAC verify).
+- `@clairtus/tenancy` — tenants + hashed test/live API keys (`Tenancy`: createTenant,
+  issueApiKey, authenticate, revokeApiKey) + **Postgres RLS toolkit** (`tenantRlsSql`,
+  `withTenant`, `app.current_tenant` GUC) proving invariant #4 (cross-tenant denied).
 
 ### Invariants (asserted across tests — keep true)
 1. Every ledger posting group balances (Σdebits = Σcredits).
@@ -61,7 +64,19 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E2 / T2.3 — Korapay adapter (SA) — 🟢 adapter built + custody model PROVEN (a)+(c); (b)+(d) need Korapay written confirmation
+## NEXT: E3 / T3.2 — NestJS B2B API skeleton (auth guard + idempotency + error envelope)
+Branch `claude/e3-tenancy-api` (worktree `.claude/worktrees/e3-tenancy-api`), off main after PR #12.
+- **T3.1 ✅ DONE** — `@clairtus/tenancy` (tenants, hashed test/live API keys, RLS isolation; 10 tests).
+- **T3.2 (next)** — scaffold `apps/b2b-api` (NestJS): API-key guard wired to `Tenancy.authenticate`;
+  `Idempotency-Key` middleware → `idempotency_keys`; consistent error envelope; `/v1` versioning;
+  cursor pagination. *Tests first:* idempotent replay returns cached response (invariant #3); auth
+  guard (valid/invalid/revoked); error shape. Supertest against the Nest app with a seeded tenant.
+- **T3.3** escrow/party/payout endpoints · **T3.4** outbound signed webhooks.
+- Production note (from T2.3): payouts need a static egress IP whitelisted in Korapay **Live** mode.
+
+---
+
+## (DONE, merged PR #12) E2 / T2.3 — Korapay adapter (SA) — custody model PROVEN (a)+(c); (b)+(d) need Korapay written confirmation
 
 **Korapay sandbox creds:** in `packages/payments/.env.local` (git-ignored):
 `KORAPAY_SECRET_KEY` (sk_test_…), `KORAPAY_PUBLIC_KEY` (pk_test_…), `KORAPAY_ENCRYPTION_KEY`.
