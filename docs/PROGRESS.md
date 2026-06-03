@@ -39,7 +39,11 @@ bootstrapped/cash-minimal.
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
 | **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
 | **E4** KYC + sandbox + docs + SDK | ✅ Complete (PR open) — T4.1 KYC · T4.2 sandbox/simulated rail · T4.3 OpenAPI + typed SDK + quickstart |
-| E5 Dashboard + hardening + onboarding | ⬜ |
+| **E5** Dashboard + hardening + onboarding | ✅ Complete (PR open) — T5.1 dashboard · T5.2 hardening · T5.3 onboarding kit |
+
+**🎉 MVP (E0–E5) feature-complete.** 188 tests green. Remaining is the tracked carry-forwards
+(prod Postgres adapter + migrations, webhook cron, Korapay Live IP/custody sign-off, OTel exporter)
+and operational milestones (≥1 partner in sandbox, ≥1 live pilot).
 
 ### Packages built (all green; ~104 tests)
 - `@clairtus/shared` — Money (integer minor units) + arithmetic + applyBps.
@@ -64,9 +68,42 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E5 — dashboard, hardening & onboarding
-**E3 complete (PR #13). E4 COMPLETE** (branch `claude/e4-kyc`, PR open; stacked on E3 until #13 merges).
-**160 tests** green across packages + app. Merge order: **#13 (E3) → E4 PR → E5**.
+## NEXT: merge the stack, then carry-forwards / pilot
+**E0–E5 COMPLETE.** Three stacked PRs — merge order **#13 (E3) → #14 (E4) → E5 PR**. Then the
+carry-forwards (prod Postgres adapter + `infra/` migrations, webhook `processDue` cron, Korapay Live
+egress-IP + custody (b)/(d) sign-off, OTel exporter) and the design-partner pilot.
+Branch `claude/e5-dashboard` (worktree `.claude/worktrees/e5-dashboard`, stacked on `claude/e4-kyc`).
+**188 tests** green across 12 workspaces.
+
+### E5 progress
+- **T5.1 ✅** — `apps/client-dashboard` (Next 16 / React 19 / Tailwind v4, **matching the
+  website/admin design system**: brand green `hsl(153 60% 53%)`, Red Hat Display, slate shell).
+  Cookie-based API-key connect (`/api/connect` validates via SDK + httpOnly cookie; `/connect`,
+  disconnect); pages: overview (balances + recent escrows), escrows list + detail, payouts,
+  webhook deliveries; sandbox/live `ModeBadge` from the key prefix. Server components use
+  `@clairtus/sdk` (key never reaches the browser). Added API list endpoints `GET /v1/escrows`,
+  `GET /v1/payouts` + SDK `escrows.list()/payouts.list()/webhookDeliveries.list()`.
+  Tests: format + 4 components (RTL) = 10; **`next build` passes** (9 routes). Toolchain: vitest +
+  @vitejs/plugin-react + jsdom (Next server wiring is thin; lib + components are the tested core).
+- **T5.2 ✅** — reliability hardening (3 mechanisms, tested):
+  - **Circuit breaker + failover** in `RailRouter` (`packages/payments`): `CircuitBreaker`
+    (closed/open/half-open) per rail; `router.run()` fails over and skips open rails, re-trying
+    after cooldown. `breakerState(id)` for observability.
+  - **Durable queue + DLQ** (`@clairtus/queue`): `JobQueue` over SqlExecutor — enqueue/claim/
+    complete/fail with exponential backoff; dead-letters after max attempts. pglite-tested.
+  - **Structured logs + correlation IDs** (`@clairtus/observability`): JSON logger that stamps the
+    current correlation id (AsyncLocalStorage, propagates across awaits) — the seam for an OTel
+    exporter. `correlationMiddleware` wired into b2b-api (`X-Request-Id` echoed/generated).
+  - *Integration follow-ups:* route the API's payout path through `router.run` (currently a single
+    mode-selected rail); move webhook/payout retries onto `@clairtus/queue` (webhook has its own
+    retry today); attach an OpenTelemetry exporter to the logger/correlation seam.
+- **T5.3 ✅** — onboarding kit: tested `onboardTenant()` (`apps/b2b-api/src/onboarding/onboard.ts`)
+  composing Tenancy + WebhookService → tenant + test/live keys + webhook endpoint (2 tests);
+  `PartnerConfig` type; **`docs/ONBOARDING.md`** runbook (outreach → sandbox sign-off → go-live
+  checklist → pilot). Operational "done" (≥1 partner sandbox, ≥1 live pilot) is the co-founder track.
+
+> To view the dashboard live you need the API running with a real Postgres adapter (carry-forward #1)
+> + `CLAIRTUS_API_URL`; then `next dev` and connect with a `ck_test_…` key.
 
 ### E4 progress
 - **T4.1 ✅** — `@clairtus/kyc` package: `KycProvider` interface + **Smile ID adapter** ported from the
