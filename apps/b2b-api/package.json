@@ -8,6 +8,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@clairtus/core": "workspace:*",
+    "@clairtus/ledger": "workspace:*",
+    "@clairtus/payments": "workspace:*",
+    "@clairtus/shared": "workspace:*",
     "@clairtus/tenancy": "workspace:*",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",

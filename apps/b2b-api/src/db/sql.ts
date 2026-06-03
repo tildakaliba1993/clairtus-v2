@@ -3,6 +3,9 @@ import type { SqlExecutor } from '@clairtus/tenancy';
 /** DI token for the database executor (pglite in tests, Postgres adapter in prod). */
 export const SQL = 'SQL_EXECUTOR';
 
+/** DI token for the payout rail (a PaymentRail, or null when payouts only post to the ledger). */
+export const RAIL = 'PAYMENT_RAIL';
+
 export type { SqlExecutor };
 
 /** Idempotency ledger: one row per (tenant, Idempotency-Key) — caches the response. */

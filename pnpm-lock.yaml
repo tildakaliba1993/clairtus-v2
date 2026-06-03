@@ -23,6 +23,18 @@ importers:
 
   apps/b2b-api:
     dependencies:
+      '@clairtus/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@clairtus/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
+      '@clairtus/payments':
+        specifier: workspace:*
+        version: link:../../packages/payments
+      '@clairtus/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@clairtus/tenancy':
         specifier: workspace:*
         version: link:../../packages/tenancy
