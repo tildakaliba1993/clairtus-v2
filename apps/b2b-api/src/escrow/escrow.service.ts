@@ -22,7 +22,8 @@ import {
 } from '@clairtus/core';
 import { Ledger, type AccountType } from '@clairtus/ledger';
 import type { PaymentRail } from '@clairtus/payments';
-import { SQL, RAIL, KYC_RELEASE_THRESHOLD, type SqlExecutor } from '../db/sql';
+import type { ApiKeyMode } from '@clairtus/tenancy';
+import { SQL, RAIL, SIMULATED_RAIL, KYC_RELEASE_THRESHOLD, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
 
 export interface CreatePartyDto {
@@ -46,6 +47,8 @@ export interface CreatePayoutDto {
   escrowId: string;
   recipientPartyId: string;
   amount: number;
+  /** Sandbox only: { simulate: 'succeeded' | 'failed' | 'pending' } drives the simulated rail. */
+  metadata?: Record<string, unknown>;
 }
 
 interface EscrowRow {
@@ -64,6 +67,7 @@ export class EscrowService {
   constructor(
     @Inject(SQL) private readonly sql: SqlExecutor,
     @Inject(RAIL) private readonly rail: PaymentRail | null,
+    @Inject(SIMULATED_RAIL) private readonly simulatedRail: PaymentRail | null,
     @Inject(KYC_RELEASE_THRESHOLD) private readonly kycReleaseThreshold: number,
     private readonly webhooks: WebhookService,
   ) {
@@ -219,7 +223,7 @@ export class EscrowService {
 
   // ---- payouts -----------------------------------------------------------
 
-  async createPayout(tenantId: string, dto: CreatePayoutDto) {
+  async createPayout(tenantId: string, dto: CreatePayoutDto, mode: ApiKeyMode = 'live') {
     if (!Number.isInteger(dto.amount) || dto.amount <= 0) throw new BadRequestException('amount must be a positive integer');
     const escrow = await this.loadEscrow(tenantId, dto.escrowId);
     await this.assertPartyExists(tenantId, dto.recipientPartyId, 'recipient');
@@ -238,37 +242,45 @@ export class EscrowService {
     );
     const payoutId = ins.rows[0]!.id;
 
-    await this.ledger.post(
-      buildPayoutPosting({
-        tenantId, reference: `payout:${payoutId}`, currency: escrow.currency, escrowId: dto.escrowId,
-        amount: dto.amount, recipientAccount, externalAccount: external,
-      }),
-    );
+    // Sandbox parity: test-mode keys disburse through the simulated rail; live keys through the real rail.
+    const rail = mode === 'live' ? this.rail : this.simulatedRail;
 
-    let rail: string | null = null;
+    let railId: string | null = null;
     let railRef: string | null = null;
     let status = 'pending';
-    if (this.rail) {
+    if (rail) {
       const party = await this.sql.query<{ account_ref: string | null; bank_code: string | null; name: string | null }>(
         `select account_ref, bank_code, name from parties where id = $1 and tenant_id = $2`,
         [dto.recipientPartyId, tenantId],
       );
       const p = party.rows[0]!;
-      const res = await this.rail.initiatePayout({
+      const res = await rail.initiatePayout({
         reference: payoutId, amount: dto.amount, currency: escrow.currency, country: '',
         method: 'bank_transfer',
         recipient: { accountRef: p.account_ref ?? undefined, bankCode: p.bank_code ?? undefined, name: p.name ?? undefined },
+        metadata: dto.metadata,
       });
-      rail = this.rail.id; railRef = res.railRef; status = res.status;
+      railId = rail.id; railRef = res.railRef; status = res.status;
       await this.sql.query(`update payouts set rail = $1, rail_ref = $2, status = $3 where id = $4 and tenant_id = $5`,
-        [rail, railRef, status, payoutId, tenantId]);
+        [railId, railRef, status, payoutId, tenantId]);
     }
+
+    // A FAILED disbursement must not move funds out of the recipient balance.
+    if (status !== 'failed') {
+      await this.ledger.post(
+        buildPayoutPosting({
+          tenantId, reference: `payout:${payoutId}`, currency: escrow.currency, escrowId: dto.escrowId,
+          amount: dto.amount, recipientAccount, externalAccount: external,
+        }),
+      );
+    }
+
     await this.webhooks.emit(tenantId, {
       type: status === 'failed' ? 'payout.failed' : 'payout.succeeded',
       escrowId: dto.escrowId,
       data: { payoutId, amount: dto.amount, railRef },
     });
-    return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail, railRef, status, createdAt: ins.rows[0]!.created_at };
+    return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail: railId, railRef, status, createdAt: ins.rows[0]!.created_at };
   }
 
   async getPayout(tenantId: string, id: string) {

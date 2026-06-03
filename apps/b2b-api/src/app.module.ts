@@ -12,7 +12,8 @@ import { WebhookController } from './webhooks/webhook.controller';
 import { WebhookService } from './webhooks/webhook.service';
 import { KycController } from './kyc/kyc.controller';
 import { KycService } from './kyc/kyc.service';
-import { SQL, RAIL, FETCH, KYC_PROVIDER, KYC_CALLBACK_URL, KYC_RELEASE_THRESHOLD, UNCONFIGURED_SQL, type SqlExecutor } from './db/sql';
+import { SimulatedRail } from '@clairtus/payments';
+import { SQL, RAIL, SIMULATED_RAIL, FETCH, KYC_PROVIDER, KYC_CALLBACK_URL, KYC_RELEASE_THRESHOLD, UNCONFIGURED_SQL, type SqlExecutor } from './db/sql';
 import { ApiKeyGuard } from './common/api-key.guard';
 import { IdempotencyInterceptor } from './common/idempotency.interceptor';
 import { HttpErrorFilter } from './common/http-error.filter';
@@ -33,6 +34,8 @@ import { HttpErrorFilter } from './common/http-error.filter';
     { provide: SQL, useValue: UNCONFIGURED_SQL },
     // Payout rail — null by default (payouts only post to the ledger); a PaymentRail in prod/tests.
     { provide: RAIL, useValue: null },
+    // Sandbox rail for test-mode keys — always available (deterministic, no network).
+    { provide: SIMULATED_RAIL, useValue: new SimulatedRail() },
     // fetch used for outbound webhook delivery (overridden with a fake in tests).
     { provide: FETCH, useValue: globalThis.fetch },
     // KYC: provider null until configured; releases above the threshold (minor units) require a VERIFIED seller.

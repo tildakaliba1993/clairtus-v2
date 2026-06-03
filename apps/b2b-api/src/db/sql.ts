@@ -3,8 +3,11 @@ import type { SqlExecutor } from '@clairtus/tenancy';
 /** DI token for the database executor (pglite in tests, Postgres adapter in prod). */
 export const SQL = 'SQL_EXECUTOR';
 
-/** DI token for the payout rail (a PaymentRail, or null when payouts only post to the ledger). */
+/** DI token for the LIVE payout rail (a PaymentRail, or null when payouts only post to the ledger). */
 export const RAIL = 'PAYMENT_RAIL';
+
+/** DI token for the sandbox rail used by test-mode keys (deterministic, no network). */
+export const SIMULATED_RAIL = 'SIMULATED_RAIL';
 
 /** DI token for the fetch implementation used to deliver outbound webhooks (overridable in tests). */
 export const FETCH = 'FETCH_IMPL';
