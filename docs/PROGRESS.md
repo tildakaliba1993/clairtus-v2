@@ -39,7 +39,11 @@ bootstrapped/cash-minimal.
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
 | **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
 | **E4** KYC + sandbox + docs + SDK | ✅ Complete (PR open) — T4.1 KYC · T4.2 sandbox/simulated rail · T4.3 OpenAPI + typed SDK + quickstart |
-| **E5** Dashboard + hardening + onboarding | 🟡 In progress — **T5.1 ✅** (dashboard) + **T5.2 ✅** (circuit breaker · queue+DLQ · logs/correlation); T5.3 (onboarding kit) ⬜ |
+| **E5** Dashboard + hardening + onboarding | ✅ Complete (PR open) — T5.1 dashboard · T5.2 hardening · T5.3 onboarding kit |
+
+**🎉 MVP (E0–E5) feature-complete.** 188 tests green. Remaining is the tracked carry-forwards
+(prod Postgres adapter + migrations, webhook cron, Korapay Live IP/custody sign-off, OTel exporter)
+and operational milestones (≥1 partner in sandbox, ≥1 live pilot).
 
 ### Packages built (all green; ~104 tests)
 - `@clairtus/shared` — Money (integer minor units) + arithmetic + applyBps.
@@ -64,10 +68,12 @@ bootstrapped/cash-minimal.
 
 ---
 
-## NEXT: E5 / T5.3 — design-partner onboarding kit (last MVP task)
-**E3 (PR #13) + E4 (PR #14) complete. E5/T5.1 + T5.2 ✅** on branch `claude/e5-dashboard` (worktree
-`.claude/worktrees/e5-dashboard`, stacked on `claude/e4-kyc`). **186 tests** green.
-Merge order: **#13 (E3) → #14 (E4) → E5 PR**.
+## NEXT: merge the stack, then carry-forwards / pilot
+**E0–E5 COMPLETE.** Three stacked PRs — merge order **#13 (E3) → #14 (E4) → E5 PR**. Then the
+carry-forwards (prod Postgres adapter + `infra/` migrations, webhook `processDue` cron, Korapay Live
+egress-IP + custody (b)/(d) sign-off, OTel exporter) and the design-partner pilot.
+Branch `claude/e5-dashboard` (worktree `.claude/worktrees/e5-dashboard`, stacked on `claude/e4-kyc`).
+**188 tests** green across 12 workspaces.
 
 ### E5 progress
 - **T5.1 ✅** — `apps/client-dashboard` (Next 16 / React 19 / Tailwind v4, **matching the
@@ -91,8 +97,10 @@ Merge order: **#13 (E3) → #14 (E4) → E5 PR**.
   - *Integration follow-ups:* route the API's payout path through `router.run` (currently a single
     mode-selected rail); move webhook/payout retries onto `@clairtus/queue` (webhook has its own
     retry today); attach an OpenTelemetry exporter to the logger/correlation seam.
-- **T5.3 (next)** — design-partner onboarding kit: manual tenant onboarding runbook + per-partner
-  config; the outreach → sandbox → pilot path. Mostly docs/process (PROCESS task).
+- **T5.3 ✅** — onboarding kit: tested `onboardTenant()` (`apps/b2b-api/src/onboarding/onboard.ts`)
+  composing Tenancy + WebhookService → tenant + test/live keys + webhook endpoint (2 tests);
+  `PartnerConfig` type; **`docs/ONBOARDING.md`** runbook (outreach → sandbox sign-off → go-live
+  checklist → pilot). Operational "done" (≥1 partner sandbox, ≥1 live pilot) is the co-founder track.
 
 > To view the dashboard live you need the API running with a real Postgres adapter (carry-forward #1)
 > + `CLAIRTUS_API_URL`; then `next dev` and connect with a `ck_test_…` key.
