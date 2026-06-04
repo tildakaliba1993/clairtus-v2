@@ -1,8 +1,10 @@
 # Clairtus — Delivery Plan to Design-Partner Readiness
 
 **Purpose:** the single sequenced plan that turns the gap analysis ([`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md))
-into ordered, buildable milestones. Read with `PRODUCTION_READINESS.md` (the *what's missing*),
-`ARCHITECTURE.md` (the *how*), and `PROGRESS.md` (the *build state*).
+into ordered, buildable milestones. This is the **at-a-glance sequence**; for full detail see
+[`PRD_FULL.md`](PRD_FULL.md) (requirements per phase/milestone) and
+[`IMPLEMENTATION_TASKS.md`](IMPLEMENTATION_TASKS.md) (task-by-task engineering plan). Read alongside
+`PRODUCTION_READINESS.md` (the *what's missing*), `ARCHITECTURE.md` (the *how*), `PROGRESS.md` (the *build state*).
 
 _Last updated: 2026-06-04 — after Track A M1 (CI/CD) merged-pending._
 
