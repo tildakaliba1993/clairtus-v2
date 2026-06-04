@@ -12,16 +12,23 @@ export const SCOPES = {
   partiesWrite: 'parties:write',
   payoutsWrite: 'payouts:write',
   kycWrite: 'kyc:write',
+  keysRead: 'keys:read',
+  keysWrite: 'keys:write',
 } as const;
 
 export type Scope = (typeof SCOPES)[keyof typeof SCOPES];
 
-/** Full write set granted to a standard onboarding key (test + live). */
+/**
+ * Full set granted to a standard onboarding key (test + live) — the tenant's primary/admin key. Includes
+ * `keys:*` so it can manage its own tenant's keys; narrower keys it mints won't have `keys:*` unless granted.
+ */
 export const DEFAULT_WRITE_SCOPES: Scope[] = [
   SCOPES.escrowsWrite,
   SCOPES.partiesWrite,
   SCOPES.payoutsWrite,
   SCOPES.kycWrite,
+  SCOPES.keysRead,
+  SCOPES.keysWrite,
 ];
 
 export const SCOPES_KEY = 'requiredScopes';

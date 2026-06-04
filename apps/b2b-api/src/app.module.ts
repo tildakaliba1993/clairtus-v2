@@ -16,6 +16,7 @@ import { WebhookController } from './webhooks/webhook.controller';
 import { RailWebhookController } from './webhooks/rail.controller';
 import { WebhookService } from './webhooks/webhook.service';
 import { KycController } from './kyc/kyc.controller';
+import { KeyController } from './keys/key.controller';
 import { KycService } from './kyc/kyc.service';
 import { SimulatedRail, KorapayRail, type PaymentRail } from '@clairtus/payments';
 import { JobQueue } from '@clairtus/queue';
@@ -63,6 +64,7 @@ function liveRailFromEnv(): PaymentRail | null {
     WebhookController,
     RailWebhookController,
     KycController,
+    KeyController,
   ],
   providers: [
     // Database executor — Postgres (DATABASE_URL) in prod, pglite override in tests.
