@@ -1,6 +1,12 @@
 import { Tenancy } from '@clairtus/tenancy';
 import { WebhookService } from '../webhooks/webhook.service';
 import { DEFAULT_WRITE_SCOPES } from '../common/scopes';
+import type { AuditEntry } from '../audit/audit.service';
+
+/** Minimal audit sink so onboarding can log without coupling to the Nest provider. */
+export interface AuditSink {
+  record: (entry: AuditEntry) => Promise<void>;
+}
 
 /** Per-partner onboarding configuration (see docs/ONBOARDING.md). */
 export interface PartnerConfig {
@@ -30,13 +36,18 @@ const DEFAULT_SCOPES: string[] = DEFAULT_WRITE_SCOPES;
  * existing tenancy + webhook services so it stays consistent with the live system.
  */
 export async function onboardTenant(
-  deps: { tenancy: Tenancy; webhooks: WebhookService },
+  deps: { tenancy: Tenancy; webhooks: WebhookService; audit?: AuditSink },
   cfg: PartnerConfig,
 ): Promise<OnboardResult> {
   const tenant = await deps.tenancy.createTenant({ name: cfg.name, country: cfg.country });
   const scopes = cfg.scopes ?? DEFAULT_SCOPES;
   const testKey = await deps.tenancy.issueApiKey({ tenantId: tenant.id, mode: 'test', scopes });
   const liveKey = await deps.tenancy.issueApiKey({ tenantId: tenant.id, mode: 'live', scopes });
+
+  // Audit the admin actions (tenant + key issuance) — never log the plaintext keys, only last4.
+  await deps.audit?.record({ tenantId: tenant.id, action: 'tenant.created', resourceType: 'tenant', resourceId: tenant.id, metadata: { country: cfg.country } });
+  await deps.audit?.record({ tenantId: tenant.id, action: 'apikey.issued', resourceType: 'apikey', resourceId: testKey.id, metadata: { mode: 'test', last4: testKey.last4, scopes } });
+  await deps.audit?.record({ tenantId: tenant.id, action: 'apikey.issued', resourceType: 'apikey', resourceId: liveKey.id, metadata: { mode: 'live', last4: liveKey.last4, scopes } });
 
   let webhook: OnboardResult['webhook'];
   if (cfg.webhookUrl) {

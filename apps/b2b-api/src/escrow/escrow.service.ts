@@ -26,6 +26,7 @@ import type { ApiKeyMode } from '@clairtus/tenancy';
 import { SQL, RAIL, SIMULATED_RAIL, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
 import { ComplianceService } from './compliance';
+import { AuditService } from '../audit/audit.service';
 import { buildPage, decodeCursor } from '../common/pagination';
 import type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
 
@@ -60,6 +61,7 @@ export class EscrowService {
     @Inject(RAIL) private readonly rail: PaymentRail | null,
     @Inject(SIMULATED_RAIL) private readonly simulatedRail: PaymentRail | null,
     private readonly compliance: ComplianceService,
+    private readonly audit: AuditService,
     private readonly webhooks: WebhookService,
   ) {
     this.ledger = new Ledger(sql);
@@ -74,6 +76,7 @@ export class EscrowService {
        values ($1,$2,$3,$4,$5,$6) returning id, created_at`,
       [tenantId, dto.role, dto.name ?? null, dto.phone ?? null, dto.accountRef ?? null, dto.bankCode ?? null],
     );
+    await this.audit.record({ tenantId, action: 'party.created', resourceType: 'party', resourceId: rows[0]!.id, metadata: { role: dto.role } });
     return { id: rows[0]!.id, role: dto.role, name: dto.name ?? null, createdAt: rows[0]!.created_at };
   }
 
@@ -134,6 +137,7 @@ export class EscrowService {
       [tenantId, dto.baseAmount, dto.currency, dto.feeBps, dto.feeResponsibility,
         dto.buyerPartyId ?? null, dto.sellerPartyId, dto.secondaryPartyId ?? null, secondaryAmount, held.id],
     );
+    await this.audit.record({ tenantId, action: 'escrow.created', resourceType: 'escrow', resourceId: rows[0]!.id, escrowId: rows[0]!.id, metadata: { baseAmount: dto.baseAmount, currency: dto.currency } });
     return this.getEscrow(tenantId, rows[0]!.id);
   }
 
@@ -160,6 +164,7 @@ export class EscrowService {
     );
     await this.setStatus(tenantId, id, status);
     await this.webhooks.emit(tenantId, { type: 'escrow.funded', escrowId: id, data: { depositAmount: breakdown.depositAmount.amount } });
+    await this.audit.record({ tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { depositAmount: breakdown.depositAmount.amount } });
     return { ...(await this.getEscrow(tenantId, id)), depositAmount: breakdown.depositAmount.amount };
   }
 
@@ -198,6 +203,7 @@ export class EscrowService {
     );
     await this.setStatus(tenantId, id, status);
     await this.webhooks.emit(tenantId, { type: 'escrow.released', escrowId: id, data: { primaryNet: breakdown.primaryNet.amount, revenue: breakdown.platformRevenue.amount } });
+    await this.audit.record({ tenantId, action: 'escrow.released', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { primaryNet: breakdown.primaryNet.amount, revenue: breakdown.platformRevenue.amount } });
     return this.getEscrow(tenantId, id);
   }
 
@@ -217,6 +223,7 @@ export class EscrowService {
     );
     await this.setStatus(tenantId, id, status);
     await this.webhooks.emit(tenantId, { type: 'escrow.refunded', escrowId: id, data: { depositAmount: breakdown.depositAmount.amount } });
+    await this.audit.record({ tenantId, action: 'escrow.refunded', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { depositAmount: breakdown.depositAmount.amount } });
     return this.getEscrow(tenantId, id);
   }
 
@@ -224,6 +231,7 @@ export class EscrowService {
     const e = await this.loadEscrow(tenantId, id);
     await this.setStatus(tenantId, id, this.transition(e.status, 'CANCEL'));
     await this.webhooks.emit(tenantId, { type: 'escrow.cancelled', escrowId: id });
+    await this.audit.record({ tenantId, action: 'escrow.cancelled', resourceType: 'escrow', resourceId: id, escrowId: id });
     return this.getEscrow(tenantId, id);
   }
 
@@ -231,6 +239,7 @@ export class EscrowService {
     const e = await this.loadEscrow(tenantId, id);
     await this.setStatus(tenantId, id, this.transition(e.status, 'OPEN_DISPUTE'));
     await this.webhooks.emit(tenantId, { type: 'escrow.disputed', escrowId: id });
+    await this.audit.record({ tenantId, action: 'escrow.disputed', resourceType: 'escrow', resourceId: id, escrowId: id });
     return this.getEscrow(tenantId, id);
   }
 
@@ -293,6 +302,7 @@ export class EscrowService {
       escrowId: dto.escrowId,
       data: { payoutId, amount: dto.amount, railRef },
     });
+    await this.audit.record({ tenantId, action: status === 'failed' ? 'payout.failed' : 'payout.created', resourceType: 'payout', resourceId: payoutId, escrowId: dto.escrowId, metadata: { amount: dto.amount, status, railRef } });
     return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail: railId, railRef, status, createdAt: ins.rows[0]!.created_at };
   }
 

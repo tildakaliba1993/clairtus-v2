@@ -5,11 +5,14 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import { getCorrelationId } from '@clairtus/observability';
+import { captureException } from './error-tracking';
 
 /**
  * Renders every error in one consistent envelope:
  *   { "error": { "code": "unauthorized", "message": "…", "statusCode": 401 } }
- * Unknown errors become a 500 without leaking internals.
+ * Unknown errors become a 500 without leaking internals. Server-side (5xx / non-HTTP) errors are
+ * logged and reported to Sentry (when enabled), tagged with the request's correlation id.
  */
 @Catch()
 export class HttpErrorFilter implements ExceptionFilter {
@@ -17,9 +20,10 @@ export class HttpErrorFilter implements ExceptionFilter {
     const res = host.switchToHttp().getResponse();
     const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    // Log server-side (5xx / non-HTTP) errors so they're never silently swallowed.
+    // Log + report server-side (5xx / non-HTTP) errors so they're never silently swallowed.
     if (!(exception instanceof HttpException) || status >= 500) {
       console.error('[HttpErrorFilter] unhandled error:', exception);
+      captureException(exception, { correlationId: getCorrelationId(), statusCode: status });
     }
 
     let message = 'Internal server error';

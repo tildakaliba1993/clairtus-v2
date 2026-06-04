@@ -128,15 +128,33 @@ create table if not exists compliance_decisions (
 create index if not exists compliance_decisions_tenant_idx on compliance_decisions(tenant_id, created_at);
 `;
 
+/** Immutable, append-only audit log of money operations + admin actions (architecture §14). */
+export const AUDIT_SCHEMA = `
+create table if not exists audit_log (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  action text not null,          -- e.g. 'escrow.released' | 'payout.created' | 'apikey.issued'
+  resource_type text not null,   -- 'escrow' | 'payout' | 'party' | 'apikey' | 'tenant'
+  resource_id uuid,
+  escrow_id uuid,
+  actor text,                    -- key last4 / 'system' (best-effort)
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists audit_log_tenant_idx on audit_log(tenant_id, created_at);
+create index if not exists audit_log_escrow_idx on audit_log(escrow_id);
+`;
+
 /** Tenant-scoped tables that get the RLS isolation policy. */
-export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries', 'kyc_checks', 'compliance_decisions'] as const;
+export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries', 'kyc_checks', 'compliance_decisions', 'audit_log'] as const;
 
 /**
  * Applies the full schema (tenancy + ledger + idempotency + domain + RLS). Used by tests;
  * production runs the equivalent versioned migrations under infra/.
  */
 export async function applyAllSchema(sql: SqlExecutor): Promise<void> {
-  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA, COMPLIANCE_SCHEMA];
+  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA, COMPLIANCE_SCHEMA, AUDIT_SCHEMA];
   for (const block of blocks) {
     for (const stmt of block.split(';').map((s) => s.trim()).filter(Boolean)) {
       await sql.query(stmt);
