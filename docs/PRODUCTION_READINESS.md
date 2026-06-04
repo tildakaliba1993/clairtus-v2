@@ -72,11 +72,14 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 
 ## 4. Compliance (regulatory engine)
 
-- 🔴 **The compliance engine is not wired into the API.** `@clairtus/compliance` (limits, KYC thresholds,
-  velocity/structuring, live FX) is **not imported by `apps/b2b-api`** — escrow creation/funding/release run
-  with **no limit or compliance checks**. This must gate escrow amounts and releases per market (DRC BCC, SA basics).
-- 🔴 **KYC not live**: Smile ID adapter built + release-gating wired, but Smile ID prod creds aren't set, and
-  the gate is a single global threshold, not per-market tiers.
+- ✅ **Compliance engine wired (done, Track A M3).** `@clairtus/compliance` is now imported by `apps/b2b-api`
+  via a `ComplianceService`: escrow **create** is gated on per-market amount bounds + cumulative daily/monthly
+  volume (422 on violation), structuring is flagged, and every decision is recorded in `compliance_decisions`
+  (feeds the M5 audit log). Markets: SA (FICA-aligned basics, env-tunable) + DRC BCC. Amounts convert minor
+  units → USD via a configurable FX table.
+- 🟡 **KYC tiers done; prod creds pending (M9).** The release gate is now **per-market tier** (USD, falling back
+  to the global threshold) — no longer a single hardcoded global. Smile ID **production credentials** are still
+  unset (tracked in Track B M9).
 - 🟡 **No AML / sanctions / PEP screening**; no FICA (SA) program documented.
 - 🟡 **Data retention / POPIA-GDPR** (retention windows, deletion, DPA) not addressed.
 
@@ -136,7 +139,7 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 
 **Track A — make a SANDBOX design-partner pilot real (fast, low risk):**
 1. Enforce **scopes** + **required idempotency** on money POSTs; add **rate limiting** + input validation.
-2. Wire the **compliance engine** into escrow create/fund/release (limits + KYC tiers per market).
+2. ✅ Wire the **compliance engine** into escrow create/release (limits + KYC tiers per market) — DONE (M3).
 3. **Self-serve auth + API-key management** in the dashboard (Supabase Auth) — or accept manual onboarding for
    partner #1 and prioritize this for #2+.
 4. **Publish the SDK** + host **docs** (`developers.clairtus.com`); enrich OpenAPI.

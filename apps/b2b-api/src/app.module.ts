@@ -9,6 +9,7 @@ import { PartyController } from './escrow/party.controller';
 import { PayoutController } from './escrow/payout.controller';
 import { AccountController } from './escrow/account.controller';
 import { EscrowService } from './escrow/escrow.service';
+import { ComplianceService, COMPLIANCE_CONFIG, complianceConfigFromEnv } from './escrow/compliance';
 import { WebhookController } from './webhooks/webhook.controller';
 import { WebhookService } from './webhooks/webhook.service';
 import { KycController } from './kyc/kyc.controller';
@@ -85,6 +86,9 @@ function kycFromEnv(): KycProvider | null {
     { provide: KYC_CALLBACK_URL, useValue: process.env.KYC_CALLBACK_URL ?? 'https://api.clairtus.example/v1/kyc/callback' },
     { provide: KYC_RELEASE_THRESHOLD, useValue: Number(process.env.KYC_RELEASE_THRESHOLD ?? 1_000_000) },
     { provide: Tenancy, useFactory: (sql: SqlExecutor) => new Tenancy(sql), inject: [SQL] },
+    // Per-market compliance: limits/KYC tiers/FX config + the engine wired into the escrow lifecycle.
+    { provide: COMPLIANCE_CONFIG, useFactory: () => complianceConfigFromEnv() },
+    ComplianceService,
     EscrowService,
     WebhookService,
     KycService,

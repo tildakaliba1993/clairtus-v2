@@ -113,7 +113,12 @@ gracefully (CI still goes green), so merging is never blocked by a missing secre
 | `SMILE_ID_PARTNER_ID` / `SMILE_ID_API_KEY` | for KYC | Enables the Smile ID provider |
 | `SMILE_ID_SANDBOX` | — | `false` for production Smile ID |
 | `KYC_CALLBACK_URL` | for KYC | Public URL Smile ID calls back |
-| `KYC_RELEASE_THRESHOLD` | — | Release amount (minor units) requiring a VERIFIED seller |
+| `KYC_RELEASE_THRESHOLD` | — | Global fallback release amount (minor units) requiring a VERIFIED seller |
+| `THROTTLE_LIMIT` / `THROTTLE_TTL` | — | Per-API-key rate limit (default 300 req / 60000 ms) |
+| `FICA_DAILY_MAX_USD` / `FICA_MONTHLY_MAX_USD` | — | SA compliance caps (USD); defaults 1500 / 15000 |
+| `FX_ZAR_USD` / `FX_NGN_USD` / `FX_CDF_USD` | — | Local major units per 1 USD for compliance conversion |
+| `KYC_THRESHOLD_ZA_USD` / `KYC_THRESHOLD_CD_USD` | — | Per-market KYC step-up tier (USD); overrides the global fallback |
+| `STRUCTURING_THRESHOLD` | — | Repeated same-counterparty escrows in 24h that flag structuring (default 3) |
 
 ## What is NOT auto-deployable yet (carry-forwards)
 - Versioned, incremental migrations (today `migrate` applies the idempotent full schema — fine for v1).

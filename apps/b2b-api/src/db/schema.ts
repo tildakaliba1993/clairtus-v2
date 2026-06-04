@@ -107,15 +107,36 @@ create table if not exists kyc_checks (
 );
 `;
 
+/** Immutable record of every compliance decision (limits/KYC/structuring) — feeds the M5 audit log. */
+export const COMPLIANCE_SCHEMA = `
+create table if not exists compliance_decisions (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  escrow_id uuid,
+  kind text not null,            -- 'create' | 'release'
+  market text not null,          -- tenant country / market code
+  currency text not null,
+  amount_usd numeric not null,
+  daily_used_usd numeric not null default 0,
+  monthly_used_usd numeric not null default 0,
+  structuring boolean not null default false,
+  outcome text not null,         -- 'allow' | 'deny'
+  reason text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists compliance_decisions_tenant_idx on compliance_decisions(tenant_id, created_at);
+`;
+
 /** Tenant-scoped tables that get the RLS isolation policy. */
-export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries', 'kyc_checks'] as const;
+export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries', 'kyc_checks', 'compliance_decisions'] as const;
 
 /**
  * Applies the full schema (tenancy + ledger + idempotency + domain + RLS). Used by tests;
  * production runs the equivalent versioned migrations under infra/.
  */
 export async function applyAllSchema(sql: SqlExecutor): Promise<void> {
-  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA];
+  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA, COMPLIANCE_SCHEMA];
   for (const block of blocks) {
     for (const stmt of block.split(';').map((s) => s.trim()).filter(Boolean)) {
       await sql.query(stmt);
