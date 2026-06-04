@@ -88,9 +88,12 @@ _Last updated: 2026-06-04, immediately after first live deploy._
   webhook processing is synchronous/best-effort, not durable.
 - 🟡 **Observability incomplete** — structured logs + correlation IDs exist, but no OpenTelemetry exporter, no
   log aggregation/metrics/dashboards, no **error tracking** (Sentry), no **alerting**.
-- 🟡 **No CI/CD** — tests run locally; no GitHub Actions running tests/lint/typecheck on PR, no automated deploy.
+- ✅ **CI/CD (done, Track A M1)** — `.github/workflows/ci.yml` runs typecheck + the full test suite
+  (packages + apps) on every PR into `main`; `deploy.yml` re-verifies then `flyctl deploy --ha=false` on
+  push to `main` (skips gracefully until `FLY_API_TOKEN` is set). Lint is a no-op until a linter is added.
 - 🟡 **No staging environment** — only production (sandbox is a *mode*, not a separate deploy).
-- 🟡 **Readiness vs liveness** — `/v1/health` is static; add a readiness check that verifies DB connectivity.
+- ✅ **Readiness vs liveness (done, Track A M1)** — `/v1/health` stays static (liveness; Fly's machine
+  check uses it so a DB blip can't flap the node); new `GET /v1/ready` pings the DB → `503` when unreachable.
 - 🟡 **Backups / DR** — rely on Supabase defaults; document RPO/RTO and test restore. Single Fly machine (no HA).
 
 ## 6. API & developer experience
@@ -137,7 +140,8 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 3. **Self-serve auth + API-key management** in the dashboard (Supabase Auth) — or accept manual onboarding for
    partner #1 and prioritize this for #2+.
 4. **Publish the SDK** + host **docs** (`developers.clairtus.com`); enrich OpenAPI.
-5. **CI/CD** (GitHub Actions: test/lint/typecheck on PR; deploy on merge) + **error tracking** + readiness check.
+5. ✅ **CI/CD** (GitHub Actions: typecheck/test on PR; deploy on merge) + **readiness check** — DONE (M1).
+   *Still open:* **error tracking** (Sentry) — needs a DSN; deferred to a follow-up.
 
 **Track B — unlock REAL money (heavier, partly external):**
 6. Build **real pay-in collection** (Korapay charge) + **inbound rail webhook handler** → drive the lifecycle.

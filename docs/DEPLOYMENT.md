@@ -55,7 +55,11 @@ Korapay whitelists the IP that *calls* their payout API, so you need a **stable 
   proxy/NAT), then whitelist it in **Korapay → Settings → Security → IP Whitelisting (Live mode)**.
 - Also confirm Korapay custody **(b)** no auto-sweep and **(d)** held-funds segregation in writing (from E2/T2.3).
 
-Smoke: `curl https://api.clairtus.com/v1/health` → `{ "status": "ok" }`; open `https://api.clairtus.com/docs`.
+Smoke: `curl https://api.clairtus.com/v1/health` → `{ "status": "ok" }` (static liveness);
+`curl https://api.clairtus.com/v1/ready` → `{ "status": "ready" }` (readiness — pings the DB, `503`
+when unreachable); open `https://api.clairtus.com/docs`.
+> Fly's machine health check uses `/v1/health` (liveness) **on purpose** — a transient DB blip must not
+> flap the machine. `/v1/ready` is for monitors/orchestrators that should route around a broken node.
 
 ## 3. Frontends — Vercel (monorepo: one project per app)
 For each, create a Vercel project from this repo and set **Root Directory** (Vercel auto-detects Next +
@@ -82,6 +86,20 @@ The consumer "app" is WhatsApp itself — `app.clairtus.com` is the **dashboard*
 - **Onboard the first design partner:** see `docs/ONBOARDING.md` (sandbox `ck_test_…` first).
 - **Observability:** logs are structured JSON stamped with `X-Request-Id`; attach an OpenTelemetry
   exporter to `@clairtus/observability` when ready.
+
+## 6. CI/CD — GitHub Actions
+
+Two workflows in `.github/workflows/`:
+
+- **`ci.yml`** — on every **PR into `main`**: `pnpm install --frozen-lockfile` → typecheck → test
+  across all `packages/*` + `apps/*`. Tests are Docker-free (pglite + jsdom), so no services are needed.
+- **`deploy.yml`** — on every **push to `main`**: re-runs typecheck + test, then (only if they pass)
+  runs `flyctl deploy --ha=false --remote-only` for the API. The dashboard auto-deploys via Vercel on
+  push, so it isn't handled here.
+
+**One-time setup:** add a repo secret **`FLY_API_TOKEN`** (`fly tokens create deploy -a clairtus-api`)
+in GitHub → Settings → Secrets and variables → Actions. Until it's set, the deploy step **skips**
+gracefully (CI still goes green), so merging is never blocked by a missing secret.
 
 ## API environment variables
 
