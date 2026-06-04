@@ -17,6 +17,11 @@ export class HttpErrorFilter implements ExceptionFilter {
     const res = host.switchToHttp().getResponse();
     const status = exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
+    // Log server-side (5xx / non-HTTP) errors so they're never silently swallowed.
+    if (!(exception instanceof HttpException) || status >= 500) {
+      console.error('[HttpErrorFilter] unhandled error:', exception);
+    }
+
     let message = 'Internal server error';
     if (exception instanceof HttpException) {
       const body = exception.getResponse();

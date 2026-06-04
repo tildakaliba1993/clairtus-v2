@@ -6,11 +6,13 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "start": "node --import tsx src/main.ts",
+    "start": "node --import @swc-node/register/esm-register src/main.ts",
     "migrate": "node --import tsx scripts/migrate.ts",
     "webhook-worker": "node --import tsx scripts/webhook-worker.ts"
   },
   "dependencies": {
+    "@swc-node/register": "^1.10.9",
+    "@swc/core": "^1.7.0",
     "@clairtus/core": "workspace:*",
     "@clairtus/kyc": "workspace:*",
     "@clairtus/ledger": "workspace:*",
@@ -32,7 +34,6 @@
     "@clairtus/sdk": "workspace:*",
     "@electric-sql/pglite": "^0.2.17",
     "@nestjs/testing": "^11.0.0",
-    "@swc/core": "^1.7.0",
     "@types/supertest": "^6.0.2",
     "supertest": "^7.0.0",
     "unplugin-swc": "^1.5.1"
