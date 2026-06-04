@@ -20,6 +20,7 @@ const NAV = [
   { href: '/escrows', label: 'Escrows' },
   { href: '/payouts', label: 'Payouts' },
   { href: '/webhooks', label: 'Webhooks' },
+  { href: '/keys', label: 'API Keys' },
 ];
 
 export default async function RootLayout({ children }: { children: ReactNode }) {

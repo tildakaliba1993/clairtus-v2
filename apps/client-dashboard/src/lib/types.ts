@@ -31,3 +31,12 @@ export interface WebhookDelivery {
   attempts: number;
   created_at: string;
 }
+export interface ApiKey {
+  id: string;
+  mode: 'test' | 'live';
+  last4: string;
+  scopes: string[];
+  createdAt: string;
+  revokedAt: string | null;
+  active: boolean;
+}

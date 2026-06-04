@@ -1,5 +1,6 @@
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
+import "./.next/types/routes.d.ts";
 
-// NOTE: Next regenerates this on `next dev`/`next build` (adding a typed-routes import).
-// The minimal form is committed so a standalone `tsc --noEmit` (no .next/) still resolves Next types.
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
