@@ -115,6 +115,7 @@ gracefully (CI still goes green), so merging is never blocked by a missing secre
 | `KYC_CALLBACK_URL` | for KYC | Public URL Smile ID calls back |
 | `KYC_RELEASE_THRESHOLD` | — | Global fallback release amount (minor units) requiring a VERIFIED seller |
 | `THROTTLE_LIMIT` / `THROTTLE_TTL` | — | Per-API-key rate limit (default 300 req / 60000 ms) |
+| `SENTRY_DSN` | — | Enables Sentry error tracking (5xx reported with correlation id); no-op when unset |
 | `FICA_DAILY_MAX_USD` / `FICA_MONTHLY_MAX_USD` | — | SA compliance caps (USD); defaults 1500 / 15000 |
 | `FX_ZAR_USD` / `FX_NGN_USD` / `FX_CDF_USD` | — | Local major units per 1 USD for compliance conversion |
 | `KYC_THRESHOLD_ZA_USD` / `KYC_THRESHOLD_CD_USD` | — | Per-market KYC step-up tier (USD); overrides the global fallback |

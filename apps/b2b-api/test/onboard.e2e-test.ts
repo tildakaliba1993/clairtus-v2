@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
 import { WebhookService } from '../src/webhooks/webhook.service';
+import { AuditService } from '../src/audit/audit.service';
 import { applyAllSchema } from '../src/db/schema';
 import { onboardTenant } from '../src/onboarding/onboard';
 
@@ -29,10 +30,11 @@ const stubFetch = (async () => ({ ok: true, status: 200 }) as Response) as unkno
 
 let tenancy: Tenancy;
 let webhooks: WebhookService;
+let sql: SqlExecutor;
 
 beforeEach(async () => {
   const db = new PGlite();
-  const sql = executor(db);
+  sql = executor(db);
   await applyAllSchema(sql);
   tenancy = new Tenancy(sql);
   webhooks = new WebhookService(sql, stubFetch);
@@ -60,5 +62,18 @@ describe('onboardTenant (design-partner onboarding kit)', () => {
     const result = await onboardTenant({ tenancy, webhooks }, { name: 'No Hook', country: 'NG' });
     expect(result.webhook).toBeUndefined();
     expect(result.testKey.startsWith('ck_test_')).toBe(true);
+  });
+
+  it('audits tenant creation + key issuance when an audit sink is provided (PR-5.3)', async () => {
+    const audit = new AuditService(sql);
+    const result = await onboardTenant({ tenancy, webhooks, audit }, { name: 'Audited', country: 'ZA' });
+    const rows = await sql.query<{ action: string; metadata: { last4?: string } }>(
+      `select action, metadata from audit_log where tenant_id = $1 order by created_at`,
+      [result.tenantId],
+    );
+    const actions = rows.rows.map((r) => r.action);
+    expect(actions).toEqual(expect.arrayContaining(['tenant.created', 'apikey.issued', 'apikey.issued']));
+    // Plaintext keys are never logged — only last4.
+    expect(rows.rows.every((r) => !JSON.stringify(r.metadata).includes('ck_'))).toBe(true);
   });
 });

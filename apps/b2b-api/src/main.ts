@@ -4,10 +4,12 @@ import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { buildOpenApiConfig } from './openapi';
 import { correlationMiddleware } from './common/correlation';
+import { initErrorTracking } from './common/error-tracking';
 
 // Production bootstrap. The DB/rail/KYC providers are env-driven (see app.module): set
 // DATABASE_URL (Postgres) + run `pnpm migrate` before serving money endpoints.
 async function bootstrap(): Promise<void> {
+  await initErrorTracking(); // Sentry, if SENTRY_DSN is set (no-op otherwise)
   const app = await NestFactory.create(AppModule);
   app.use(correlationMiddleware); // correlation id + structured-log context per request
   app.enableShutdownHooks(); // clean SIGTERM handling (Fly/Render rolling deploys)

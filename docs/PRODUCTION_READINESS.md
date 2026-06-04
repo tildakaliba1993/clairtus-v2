@@ -66,7 +66,9 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 - 🔴 **No rate limiting / throttling** (abuse + brute-force protection). Add `@nestjs/throttler` or edge limits.
 - 🟡 **Thin input validation** — handlers do manual checks; no `class-validator`/`ValidationPipe`, so malformed
   payloads aren't consistently rejected with 422.
-- 🟡 **No immutable audit log** of money operations / admin actions (architecture §14 requires it).
+- ✅ **Immutable audit log (done, Track A M5)** — append-only `audit_log` written on every money operation
+  (escrow create/fund/release/refund/cancel/dispute, payout) + admin actions (tenant/key issuance), via
+  `AuditService`; queryable by tenant + escrow. Never updated/deleted (architecture §14).
 - 🟡 **Secrets hygiene**: a DB password and a GitHub PAT were exposed during setup and **rotated** — adopt a
   secrets policy (managers only, never in logs/chat). CORS is unset (fine while the dashboard calls server-side).
 
@@ -89,8 +91,9 @@ _Last updated: 2026-06-04, immediately after first live deploy._
   runs it, so failed webhook deliveries aren't retried in prod.
 - 🟡 **Durable queue (DLQ) not wired** — `@clairtus/queue` is migrated but no flow enqueues; pay-in/payout/
   webhook processing is synchronous/best-effort, not durable.
-- 🟡 **Observability incomplete** — structured logs + correlation IDs exist, but no OpenTelemetry exporter, no
-  log aggregation/metrics/dashboards, no **error tracking** (Sentry), no **alerting**.
+- 🟡 **Observability partial** — structured logs + correlation IDs + ✅ **error tracking (Sentry, M5)** wired
+  (no-op until `SENTRY_DSN` is set, reports 5xx with the correlation id). Still missing: OpenTelemetry
+  exporter, log aggregation/metrics/dashboards, **alerting** (tracked in Track B M11).
 - ✅ **CI/CD (done, Track A M1)** — `.github/workflows/ci.yml` runs typecheck + the full test suite
   (packages + apps) on every PR into `main`; `deploy.yml` re-verifies then `flyctl deploy --ha=false` on
   push to `main` (skips gracefully until `FLY_API_TOKEN` is set). Lint is a no-op until a linter is added.
@@ -146,7 +149,7 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 4. ✅ **Publish the SDK** + host **docs** + enrich OpenAPI + cursor pagination — DONE (M4); SDK `npm publish`
    and `developers.clairtus.com` DNS are the remaining one-step operator actions (runbook in `DEVELOPER_DOCS.md`).
 5. ✅ **CI/CD** (GitHub Actions: typecheck/test on PR; deploy on merge) + **readiness check** — DONE (M1).
-   *Still open:* **error tracking** (Sentry) — needs a DSN; deferred to a follow-up.
+   ✅ **error tracking** (Sentry) + **immutable audit log** — DONE (M5); set `SENTRY_DSN` to activate Sentry.
 
 **Track B — unlock REAL money (heavier, partly external):**
 6. Build **real pay-in collection** (Korapay charge) + **inbound rail webhook handler** → drive the lifecycle.

@@ -10,6 +10,7 @@ import { PayoutController } from './escrow/payout.controller';
 import { AccountController } from './escrow/account.controller';
 import { EscrowService } from './escrow/escrow.service';
 import { ComplianceService, COMPLIANCE_CONFIG, complianceConfigFromEnv } from './escrow/compliance';
+import { AuditService } from './audit/audit.service';
 import { WebhookController } from './webhooks/webhook.controller';
 import { WebhookService } from './webhooks/webhook.service';
 import { KycController } from './kyc/kyc.controller';
@@ -89,6 +90,8 @@ function kycFromEnv(): KycProvider | null {
     // Per-market compliance: limits/KYC tiers/FX config + the engine wired into the escrow lifecycle.
     { provide: COMPLIANCE_CONFIG, useFactory: () => complianceConfigFromEnv() },
     ComplianceService,
+    // Immutable audit log of money operations + admin actions.
+    AuditService,
     EscrowService,
     WebhookService,
     KycService,
