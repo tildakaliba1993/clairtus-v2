@@ -82,9 +82,10 @@ _Last updated: 2026-06-04, immediately after first live deploy._
   volume (422 on violation), structuring is flagged, and every decision is recorded in `compliance_decisions`
   (feeds the M5 audit log). Markets: SA (FICA-aligned basics, env-tunable) + DRC BCC. Amounts convert minor
   units → USD via a configurable FX table.
-- 🟡 **KYC tiers done; prod creds pending (M9).** The release gate is now **per-market tier** (USD, falling back
-  to the global threshold) — no longer a single hardcoded global. Smile ID **production credentials** are still
-  unset (tracked in Track B M9).
+- ✅ **KYC live-ready (done, Track B M9).** Per-market KYC **tiers** (USD, falling back to the global
+  threshold) gate higher-ticket releases — verified end-to-end. The Smile ID provider switches to
+  **production** with `SMILE_ID_SANDBOX=false` (`kycProviderFromEnv`, unit-tested). *Operator action:*
+  set the live Smile ID `SMILE_ID_PARTNER_ID` / `SMILE_ID_API_KEY` + `SMILE_ID_SANDBOX=false` on Fly.
 - 🟡 **No AML / sanctions / PEP screening**; no FICA (SA) program documented.
 - 🟡 **Data retention / POPIA-GDPR** (retention windows, deletion, DPA) not addressed.
 

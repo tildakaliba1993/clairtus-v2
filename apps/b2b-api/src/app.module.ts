@@ -19,7 +19,7 @@ import { KycService } from './kyc/kyc.service';
 import { SimulatedRail, KorapayRail, type PaymentRail } from '@clairtus/payments';
 import { JobQueue } from '@clairtus/queue';
 import { buildPayoutRouters } from './escrow/payout-dispatch';
-import { SmileIdProvider, type KycProvider } from '@clairtus/kyc';
+import { kycProviderFromEnv } from './kyc/kyc-config';
 import { SQL, RAIL, SIMULATED_RAIL, PAYOUT_ROUTERS, JOB_QUEUE, FETCH, KYC_PROVIDER, KYC_CALLBACK_URL, KYC_RELEASE_THRESHOLD, UNCONFIGURED_SQL, type SqlExecutor } from './db/sql';
 import { connectPostgres } from './db/postgres';
 import { ApiKeyGuard } from './common/api-key.guard';
@@ -42,20 +42,6 @@ function liveRailFromEnv(): PaymentRail | null {
     notificationUrl: process.env.KORAPAY_WEBHOOK_URL,
   });
 }
-function kycFromEnv(): KycProvider | null {
-  const partnerId = process.env.SMILE_ID_PARTNER_ID;
-  const apiKey = process.env.SMILE_ID_API_KEY;
-  if (!partnerId || !apiKey) return null;
-  const sandbox = process.env.SMILE_ID_SANDBOX !== 'false';
-  return new SmileIdProvider({
-    baseUrl: sandbox ? 'https://testapi.smileidentity.com' : 'https://api.smileidentity.com',
-    partnerId,
-    apiKey,
-    country: process.env.SMILE_ID_COUNTRY,
-    idType: process.env.SMILE_ID_ID_TYPE,
-  });
-}
-
 @Module({
   imports: [
     // Per-API-key rate limiting (env-tunable). Default 300 requests / 60s.
@@ -91,7 +77,7 @@ function kycFromEnv(): KycProvider | null {
     // fetch used for outbound webhook delivery (overridden with a fake in tests).
     { provide: FETCH, useValue: globalThis.fetch },
     // KYC: Smile ID when configured; releases above the threshold (minor units) require a VERIFIED seller.
-    { provide: KYC_PROVIDER, useFactory: kycFromEnv },
+    { provide: KYC_PROVIDER, useFactory: () => kycProviderFromEnv() },
     { provide: KYC_CALLBACK_URL, useValue: process.env.KYC_CALLBACK_URL ?? 'https://api.clairtus.example/v1/kyc/callback' },
     { provide: KYC_RELEASE_THRESHOLD, useValue: Number(process.env.KYC_RELEASE_THRESHOLD ?? 1_000_000) },
     { provide: Tenancy, useFactory: (sql: SqlExecutor) => new Tenancy(sql), inject: [SQL] },
