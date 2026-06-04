@@ -21,13 +21,15 @@ import {
   type FeeResponsibility,
 } from '@clairtus/core';
 import { Ledger, type AccountType } from '@clairtus/ledger';
-import type { PaymentRail, NormalizedEvent } from '@clairtus/payments';
+import { RailRoutingError, type PaymentRail, type NormalizedEvent, type RouteCriteria } from '@clairtus/payments';
+import { JobQueue } from '@clairtus/queue';
 import type { ApiKeyMode } from '@clairtus/tenancy';
-import { SQL, RAIL, SIMULATED_RAIL, type SqlExecutor } from '../db/sql';
+import { SQL, RAIL, PAYOUT_ROUTERS, JOB_QUEUE, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
 import { ComplianceService } from './compliance';
 import { AuditService } from '../audit/audit.service';
 import { buildPage, decodeCursor } from '../common/pagination';
+import { type PayoutRouters, type PayoutDispatchJob, PAYOUT_DISPATCH_QUEUE } from './payout-dispatch';
 import type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
 
 /** Cursor-pagination query options for list endpoints. */
@@ -59,7 +61,8 @@ export class EscrowService {
   constructor(
     @Inject(SQL) private readonly sql: SqlExecutor,
     @Inject(RAIL) private readonly rail: PaymentRail | null,
-    @Inject(SIMULATED_RAIL) private readonly simulatedRail: PaymentRail | null,
+    @Inject(PAYOUT_ROUTERS) private readonly payoutRouters: PayoutRouters,
+    @Inject(JOB_QUEUE) private readonly queue: JobQueue,
     private readonly compliance: ComplianceService,
     private readonly audit: AuditService,
     private readonly webhooks: WebhookService,
@@ -96,15 +99,15 @@ export class EscrowService {
   }
 
   /** Contact details for a party (for rail pay-in/payout payloads); empty when none/unknown. */
-  private async partyContact(tenantId: string, partyId: string | null): Promise<{ phone?: string; accountRef?: string; name?: string }> {
+  private async partyContact(tenantId: string, partyId: string | null): Promise<{ phone?: string; accountRef?: string; bankCode?: string; name?: string }> {
     if (!partyId) return {};
-    const { rows } = await this.sql.query<{ phone: string | null; account_ref: string | null; name: string | null }>(
-      `select phone, account_ref, name from parties where id = $1 and tenant_id = $2`,
+    const { rows } = await this.sql.query<{ phone: string | null; account_ref: string | null; bank_code: string | null; name: string | null }>(
+      `select phone, account_ref, bank_code, name from parties where id = $1 and tenant_id = $2`,
       [partyId, tenantId],
     );
     const p = rows[0];
     if (!p) return {};
-    return { phone: p.phone ?? undefined, accountRef: p.account_ref ?? undefined, name: p.name ?? undefined };
+    return { phone: p.phone ?? undefined, accountRef: p.account_ref ?? undefined, bankCode: p.bank_code ?? undefined, name: p.name ?? undefined };
   }
 
   /** The tenant's market (ISO-2 country) — drives per-market compliance rules + KYC tiers. */
@@ -306,31 +309,50 @@ export class EscrowService {
     );
     const payoutId = ins.rows[0]!.id;
 
-    // Sandbox parity: test-mode keys disburse through the simulated rail; live keys through the real rail.
-    const rail = mode === 'live' ? this.rail : this.simulatedRail;
+    // Disburse through the per-mode RailRouter (circuit breaker + failover live in the money path).
+    const router = mode === 'live' ? this.payoutRouters.live : this.payoutRouters.sandbox;
+    const criteria: RouteCriteria = {
+      direction: 'payOut',
+      country: await this.tenantCountry(tenantId),
+      currency: escrow.currency,
+      method: 'bank_transfer',
+    };
 
     let railId: string | null = null;
     let railRef: string | null = null;
     let status = 'pending';
-    if (rail) {
-      const party = await this.sql.query<{ account_ref: string | null; bank_code: string | null; name: string | null }>(
-        `select account_ref, bank_code, name from parties where id = $1 and tenant_id = $2`,
-        [dto.recipientPartyId, tenantId],
-      );
-      const p = party.rows[0]!;
-      const res = await rail.initiatePayout({
-        reference: payoutId, amount: dto.amount, currency: escrow.currency, country: '',
-        method: 'bank_transfer',
-        recipient: { accountRef: p.account_ref ?? undefined, bankCode: p.bank_code ?? undefined, name: p.name ?? undefined },
-        metadata: dto.metadata,
-      });
-      railId = rail.id; railRef = res.railRef; status = res.status;
-      await this.sql.query(`update payouts set rail = $1, rail_ref = $2, status = $3 where id = $4 and tenant_id = $5`,
-        [railId, railRef, status, payoutId, tenantId]);
+    let queuedRetry = false;
+
+    if (router.candidates(criteria).length > 0) {
+      const recipient = await this.partyContact(tenantId, dto.recipientPartyId);
+      try {
+        let used: PaymentRail | undefined;
+        const res = await router.run(criteria, (r) => {
+          used = r;
+          return r.initiatePayout({
+            reference: payoutId, amount: dto.amount, currency: escrow.currency, country: criteria.country,
+            method: 'bank_transfer', recipient, metadata: dto.metadata,
+          });
+        });
+        railId = used!.id; railRef = res.railRef; status = res.status;
+        await this.sql.query(`update payouts set rail = $1, rail_ref = $2, status = $3 where id = $4 and tenant_id = $5`,
+          [railId, railRef, status, payoutId, tenantId]);
+      } catch (err) {
+        if (!(err instanceof RailRoutingError)) throw err;
+        // Every eligible rail failed / was unavailable → enqueue a durable retry (queue + DLQ).
+        // Funds are NOT moved yet; the worker posts to the ledger when a dispatch finally succeeds.
+        const job: PayoutDispatchJob = {
+          payoutId, tenantId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId,
+          amount: dto.amount, currency: escrow.currency, country: criteria.country,
+        };
+        await this.queue.enqueue(PAYOUT_DISPATCH_QUEUE, job);
+        queuedRetry = true;
+      }
     }
 
-    // A FAILED disbursement must not move funds out of the recipient balance.
-    if (status !== 'failed') {
+    // Move funds out of the recipient balance once the disbursement is accepted — never on a FAILED
+    // result, and not while a retry is still queued (the worker posts on the eventual success).
+    if (status !== 'failed' && !queuedRetry) {
       await this.ledger.post(
         buildPayoutPosting({
           tenantId, reference: `payout:${payoutId}`, currency: escrow.currency, escrowId: dto.escrowId,
@@ -339,13 +361,58 @@ export class EscrowService {
       );
     }
 
-    await this.webhooks.emit(tenantId, {
-      type: status === 'failed' ? 'payout.failed' : 'payout.succeeded',
-      escrowId: dto.escrowId,
-      data: { payoutId, amount: dto.amount, railRef },
-    });
-    await this.audit.record({ tenantId, action: status === 'failed' ? 'payout.failed' : 'payout.created', resourceType: 'payout', resourceId: payoutId, escrowId: dto.escrowId, metadata: { amount: dto.amount, status, railRef } });
+    if (queuedRetry) {
+      await this.audit.record({ tenantId, action: 'payout.queued', resourceType: 'payout', resourceId: payoutId, escrowId: dto.escrowId, metadata: { amount: dto.amount } });
+    } else {
+      await this.webhooks.emit(tenantId, {
+        type: status === 'failed' ? 'payout.failed' : 'payout.succeeded',
+        escrowId: dto.escrowId,
+        data: { payoutId, amount: dto.amount, railRef },
+      });
+      await this.audit.record({ tenantId, action: status === 'failed' ? 'payout.failed' : 'payout.created', resourceType: 'payout', resourceId: payoutId, escrowId: dto.escrowId, metadata: { amount: dto.amount, status, railRef } });
+    }
     return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail: railId, railRef, status, createdAt: ins.rows[0]!.created_at };
+  }
+
+  /**
+   * Worker entrypoint: dispatch a queued payout (its rails were all unavailable at request time).
+   * Re-runs the router; on success updates the payout, posts to the ledger (idempotent on
+   * `payout:{id}`), and fires the outbound webhook. Throws on failure so the JobQueue retries/DLQs.
+   */
+  async dispatchQueuedPayout(job: PayoutDispatchJob): Promise<void> {
+    const { rows } = await this.sql.query<{ status: string }>(
+      `select status from payouts where id = $1 and tenant_id = $2`,
+      [job.payoutId, job.tenantId],
+    );
+    const current = rows[0];
+    if (!current || current.status === 'succeeded') return; // already done / gone — idempotent
+
+    const recipient = await this.partyContact(job.tenantId, job.recipientPartyId);
+    const criteria: RouteCriteria = { direction: 'payOut', country: job.country, currency: job.currency, method: 'bank_transfer' };
+    let used: PaymentRail | undefined;
+    const res = await this.payoutRouters.live.run(criteria, (r) => {
+      used = r;
+      return r.initiatePayout({ reference: job.payoutId, amount: job.amount, currency: job.currency, country: job.country, method: 'bank_transfer', recipient });
+    });
+
+    await this.sql.query(`update payouts set rail = $1, rail_ref = $2, status = $3 where id = $4 and tenant_id = $5`,
+      [used!.id, res.railRef, res.status, job.payoutId, job.tenantId]);
+
+    if (res.status !== 'failed') {
+      const recipientAccount = await this.account(job.tenantId, 'recipient_payable', job.currency, job.recipientPartyId);
+      const external = await this.account(job.tenantId, 'external', job.currency, null);
+      await this.ledger.post(
+        buildPayoutPosting({
+          tenantId: job.tenantId, reference: `payout:${job.payoutId}`, currency: job.currency, escrowId: job.escrowId,
+          amount: job.amount, recipientAccount, externalAccount: external,
+        }),
+      );
+    }
+    await this.webhooks.emit(job.tenantId, {
+      type: res.status === 'failed' ? 'payout.failed' : 'payout.succeeded',
+      escrowId: job.escrowId, data: { payoutId: job.payoutId, amount: job.amount, railRef: res.railRef },
+    });
+    await this.audit.record({ tenantId: job.tenantId, action: res.status === 'failed' ? 'payout.failed' : 'payout.created', resourceType: 'payout', resourceId: job.payoutId, escrowId: job.escrowId, actor: 'worker', metadata: { amount: job.amount, status: res.status, via: 'queue' } });
   }
 
   async getPayout(tenantId: string, id: string) {

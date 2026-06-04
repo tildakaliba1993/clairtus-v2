@@ -8,7 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node --import @swc-node/register/esm-register src/main.ts",
     "migrate": "node --import tsx scripts/migrate.ts",
-    "webhook-worker": "node --import tsx scripts/webhook-worker.ts",
+    "webhook-worker": "node --import @swc-node/register/esm-register scripts/webhook-worker.ts",
     "openapi:export": "node --import @swc-node/register/esm-register scripts/export-openapi.ts",
     "onboard": "node --import tsx scripts/onboard.ts",
     "demo": "node --import tsx scripts/demo-escrow.ts"

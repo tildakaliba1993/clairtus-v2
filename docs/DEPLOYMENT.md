@@ -81,8 +81,13 @@ The consumer "app" is WhatsApp itself — `app.clairtus.com` is the **dashboard*
 (`wa.me/<number>`) can live on the marketing site.
 
 ## 5. Post-deploy
-- **Webhook retry worker:** schedule `corepack pnpm --filter @clairtus/b2b-api webhook-worker`
-  on a Fly **scheduled machine** (every ~1 min) so failed deliveries are retried/drained.
+- **Background worker:** `corepack pnpm --filter @clairtus/b2b-api webhook-worker` drains **due webhook
+  deliveries** (retry/backoff) **and** the **payout-dispatch queue** (rails that were down at request
+  time), then exits. Two ways to run it:
+  - **Scheduled machine / cron** (~every 1 min): `fly machine run … --schedule` (one pass per run), or
+  - **Always-on machine** with `webhook-worker --loop` (`WORKER_INTERVAL_MS`, default 60000) — a second
+    Fly process/machine sharing the image + `DATABASE_URL`.
+  Runs under the SWC runtime (Nest DI), same as the API.
 - **Onboard the first design partner:** see `docs/ONBOARDING.md` (sandbox `ck_test_…` first).
 - **Observability:** logs are structured JSON stamped with `X-Request-Id`; attach an OpenTelemetry
   exporter to `@clairtus/observability` when ready.
@@ -116,6 +121,7 @@ gracefully (CI still goes green), so merging is never blocked by a missing secre
 | `KYC_RELEASE_THRESHOLD` | — | Global fallback release amount (minor units) requiring a VERIFIED seller |
 | `THROTTLE_LIMIT` / `THROTTLE_TTL` | — | Per-API-key rate limit (default 300 req / 60000 ms) |
 | `SENTRY_DSN` | — | Enables Sentry error tracking (5xx reported with correlation id); no-op when unset |
+| `WORKER_INTERVAL_MS` | — | `webhook-worker --loop` poll interval (default 60000) |
 | `FICA_DAILY_MAX_USD` / `FICA_MONTHLY_MAX_USD` | — | SA compliance caps (USD); defaults 1500 / 15000 |
 | `FX_ZAR_USD` / `FX_NGN_USD` / `FX_CDF_USD` | — | Local major units per 1 USD for compliance conversion |
 | `KYC_THRESHOLD_ZA_USD` / `KYC_THRESHOLD_CD_USD` | — | Per-market KYC step-up tier (USD); overrides the global fallback |
