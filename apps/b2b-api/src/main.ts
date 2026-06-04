@@ -5,10 +5,12 @@ import { AppModule } from './app.module';
 import { buildOpenApiConfig } from './openapi';
 import { correlationMiddleware } from './common/correlation';
 import { initErrorTracking } from './common/error-tracking';
+import { initTracing } from './common/tracing';
 
 // Production bootstrap. The DB/rail/KYC providers are env-driven (see app.module): set
 // DATABASE_URL (Postgres) + run `pnpm migrate` before serving money endpoints.
 async function bootstrap(): Promise<void> {
+  await initTracing(); // OpenTelemetry traces, if OTEL_EXPORTER_OTLP_ENDPOINT is set (no-op otherwise)
   await initErrorTracking(); // Sentry, if SENTRY_DSN is set (no-op otherwise)
   const app = await NestFactory.create(AppModule);
   app.use(correlationMiddleware); // correlation id + structured-log context per request

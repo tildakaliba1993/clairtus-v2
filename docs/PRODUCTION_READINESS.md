@@ -47,7 +47,9 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 - ✅ **Payouts via RailRouter (done, Track B M8).** `createPayout` disburses through a per-mode
   `RailRouter.run()` — circuit breaker + failover now in the money path. If every eligible rail is down,
   the payout is **enqueued for durable retry** (queue + DLQ) and funds aren't moved until a dispatch succeeds.
-- 🟡 **No settlement/reconciliation reports** (ledger ↔ Korapay balance reconciliation).
+- ✅ **Reconciliation report (done, Track B M11).** `ReconciliationService` + `reconcile` script compare
+  ledger custody (`escrow_held + recipient_payable`) against the PSP balance per currency and flag drift
+  (exits non-zero for alerting). Run on a schedule.
 - 🟢 Multi-currency / live FX in B2B flows; per-transaction segregated virtual accounts (Fincra).
 
 ## 2. Self-serve onboarding & authentication
@@ -97,9 +99,10 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 - ✅ **Durable queue + DLQ wired (done, Track B M8).** `@clairtus/queue` now backs **payout dispatch**
   when rails are unavailable (retry with backoff → dead-letter after max attempts); the jobs table is
   part of the prod schema/migrations.
-- 🟡 **Observability partial** — structured logs + correlation IDs + ✅ **error tracking (Sentry, M5)** wired
-  (no-op until `SENTRY_DSN` is set, reports 5xx with the correlation id). Still missing: OpenTelemetry
-  exporter, log aggregation/metrics/dashboards, **alerting** (tracked in Track B M11).
+- ✅ **Observability (done, Track B M11).** Structured logs + correlation IDs; **Sentry** (M5); an
+  **OpenTelemetry** OTLP tracer that activates when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (no-op otherwise);
+  and a **`GET /v1/system/metrics`** surface (payout-queue depth/DLQ, webhook backlog) for scraping +
+  **alerting** (plus the reconciliation drift exit-code). *Operator: point OTEL at a collector + wire alerts.*
 - ✅ **CI/CD (done, Track A M1)** — `.github/workflows/ci.yml` runs typecheck + the full test suite
   (packages + apps) on every PR into `main`; `deploy.yml` re-verifies then `flyctl deploy --ha=false` on
   push to `main` (skips gracefully until `FLY_API_TOKEN` is set). Lint is a no-op until a linter is added.

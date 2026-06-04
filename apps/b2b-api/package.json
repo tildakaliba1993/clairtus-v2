@@ -10,6 +10,7 @@
     "migrate": "node --import tsx scripts/migrate.ts",
     "webhook-worker": "node --import @swc-node/register/esm-register scripts/webhook-worker.ts",
     "openapi:export": "node --import @swc-node/register/esm-register scripts/export-openapi.ts",
+    "reconcile": "node --import @swc-node/register/esm-register scripts/reconcile.ts",
     "onboard": "node --import tsx scripts/onboard.ts",
     "demo": "node --import tsx scripts/demo-escrow.ts"
   },
@@ -28,6 +29,10 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/throttler": "^6.5.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
+    "@opentelemetry/resources": "^2.7.1",
+    "@opentelemetry/sdk-node": "^0.218.0",
+    "@opentelemetry/semantic-conventions": "^1.41.1",
     "@sentry/node": "^10.56.0",
     "@swc-node/register": "^1.10.9",
     "@swc/core": "^1.7.0",
