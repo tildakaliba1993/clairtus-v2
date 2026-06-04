@@ -1,5 +1,6 @@
 import { Tenancy } from '@clairtus/tenancy';
 import { WebhookService } from '../webhooks/webhook.service';
+import { DEFAULT_WRITE_SCOPES } from '../common/scopes';
 
 /** Per-partner onboarding configuration (see docs/ONBOARDING.md). */
 export interface PartnerConfig {
@@ -21,7 +22,7 @@ export interface OnboardResult {
   webhook?: { id: string; signingSecret: string };
 }
 
-const DEFAULT_SCOPES = ['escrows:write', 'payouts:write', 'kyc:write'];
+const DEFAULT_SCOPES: string[] = DEFAULT_WRITE_SCOPES;
 
 /**
  * One-call manual onboarding: create a tenant, issue test + live API keys, and (optionally)

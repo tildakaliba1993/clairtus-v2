@@ -2,11 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
 import { SmileIdProvider } from '@clairtus/kyc';
 import { AppModule } from '../src/app.module';
+import { DEFAULT_WRITE_SCOPES } from '../src/common/scopes';
 import { SQL, FETCH, KYC_PROVIDER, KYC_RELEASE_THRESHOLD } from '../src/db/sql';
 import { applyAllSchema } from '../src/db/schema';
 
@@ -46,7 +47,7 @@ beforeAll(async () => {
   await applyAllSchema(sql);
   const tenancy = new Tenancy(sql);
   const t = await tenancy.createTenant({ name: 'A', country: 'ZA' });
-  auth = `Bearer ${(await tenancy.issueApiKey({ tenantId: t.id, mode: 'live', scopes: [] })).plaintext}`;
+  auth = `Bearer ${(await tenancy.issueApiKey({ tenantId: t.id, mode: 'live', scopes: DEFAULT_WRITE_SCOPES })).plaintext}`;
 
   // Real Smile ID provider with a fake fetch for the /v1/token call.
   const provider = new SmileIdProvider({
@@ -73,7 +74,7 @@ async function makeFundedEscrow(sellerId: string, baseAmount: number): Promise<s
   const id = (await http().post('/v1/escrows').set('Authorization', auth).send({
     baseAmount, currency: 'ZAR', feeBps: 0, feeResponsibility: 'SELLER', sellerPartyId: sellerId,
   })).body.id;
-  await http().post(`/v1/escrows/${id}/fund`).set('Authorization', auth);
+  await http().post(`/v1/escrows/${id}/fund`).set('Authorization', auth).set('Idempotency-Key', randomUUID());
   return id;
 }
 
@@ -92,7 +93,7 @@ describe('KYC checks + Smile ID + gated release (T4.1)', () => {
 
   it('blocks a high-value release while the seller is unverified (403)', async () => {
     const escrowId = await makeFundedEscrow(sellerId, 100000); // > THRESHOLD
-    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth);
+    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth).set('Idempotency-Key', randomUUID());
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('forbidden');
   });
@@ -120,7 +121,7 @@ describe('KYC checks + Smile ID + gated release (T4.1)', () => {
 
   it('allows the high-value release once the seller is verified', async () => {
     const escrowId = await makeFundedEscrow(sellerId, 100000);
-    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth);
+    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth).set('Idempotency-Key', randomUUID());
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('RELEASED');
   });
@@ -128,7 +129,7 @@ describe('KYC checks + Smile ID + gated release (T4.1)', () => {
   it('does not gate releases at or below the threshold', async () => {
     const freshSeller = (await http().post('/v1/parties').set('Authorization', auth).send({ role: 'seller' })).body.id; // unverified
     const escrowId = await makeFundedEscrow(freshSeller, THRESHOLD); // not above threshold
-    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth);
+    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth).set('Idempotency-Key', randomUUID());
     expect(res.status).toBe(200);
   });
 });

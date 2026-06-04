@@ -89,11 +89,25 @@ const check = await clairtus.kyc.createCheck({ partyId: seller.id, level: 'biome
 // Hand check.token to the Smile ID client SDK; the result arrives on your webhook as kyc.completed.
 ```
 
+## Auth, scopes, idempotency & validation
+
+- **API keys** are `Bearer` tokens (`ck_test_…` sandbox, `ck_live_…` production). Read endpoints need
+  only a valid key; **write endpoints require a scope**: `escrows:write`, `parties:write`,
+  `payouts:write`, `kyc:write`. A key missing the scope gets **403**. (Onboarding issues keys with the
+  full write set; narrower keys are available on request.)
+- **Idempotency is required** on money-moving POSTs — `fund`, `release`, `refund`, and `payouts.create`.
+  Send an `Idempotency-Key`; the SDK **auto-generates one per call** if you don't, and reuse your own
+  across manual retries (`{ idempotencyKey }`). A missing key on these routes returns **400**.
+- **Validation:** malformed/unknown/over-range fields are rejected with **422** before anything runs.
+- **Rate limiting:** requests are throttled per API key; over the limit returns **429** (back off + retry).
+
 ## Errors
 
 Every non-2xx response throws a `ClairtusApiError` with `{ status, code, message }` — e.g. releasing
 before funding throws `{ status: 409, code: 'conflict' }`. All errors share the envelope
-`{ "error": { "code", "message", "statusCode" } }`.
+`{ "error": { "code", "message", "statusCode" } }`. Common codes: `unauthorized` (401),
+`forbidden` (403, missing scope), `bad_request` (400, e.g. missing Idempotency-Key),
+`unprocessable_entity` (422, validation), `too_many_requests` (429), `conflict` (409).
 
 ## Full API reference
 

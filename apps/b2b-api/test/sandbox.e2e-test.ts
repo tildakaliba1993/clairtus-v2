@@ -2,9 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
 import { AppModule } from '../src/app.module';
+import { DEFAULT_WRITE_SCOPES } from '../src/common/scopes';
 import { SQL, FETCH } from '../src/db/sql';
 import { applyAllSchema } from '../src/db/schema';
 
@@ -38,8 +40,8 @@ beforeAll(async () => {
   await applyAllSchema(sql);
   const tenancy = new Tenancy(sql);
   const t = await tenancy.createTenant({ name: 'A', country: 'ZA' });
-  testKey = (await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: [] })).plaintext;
-  liveKey = (await tenancy.issueApiKey({ tenantId: t.id, mode: 'live', scopes: [] })).plaintext;
+  testKey = (await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
+  liveKey = (await tenancy.issueApiKey({ tenantId: t.id, mode: 'live', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(SQL).useValue(sql)
@@ -63,8 +65,8 @@ async function releasedEscrow(auth: string): Promise<{ escrowId: string; sellerI
   const escrowId = (await http().post('/v1/escrows').set('Authorization', auth).send({
     baseAmount: 100000, currency: 'ZAR', feeBps: 150, feeResponsibility: 'SELLER', sellerPartyId: sellerId,
   })).body.id;
-  await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', auth);
-  await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth);
+  await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', auth).set('Idempotency-Key', randomUUID());
+  await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', auth).set('Idempotency-Key', randomUUID());
   return { escrowId, sellerId };
 }
 
@@ -72,7 +74,7 @@ describe('sandbox: test-mode keys route to the simulated rail (T4.2)', () => {
   it('a test-key payout disburses through the simulated rail and debits the recipient', async () => {
     const auth = `Bearer ${testKey}`;
     const { escrowId, sellerId } = await releasedEscrow(auth);
-    const payout = await http().post('/v1/payouts').set('Authorization', auth).send({ escrowId, recipientPartyId: sellerId, amount: 98500 });
+    const payout = await http().post('/v1/payouts').set('Authorization', auth).set('Idempotency-Key', randomUUID()).send({ escrowId, recipientPartyId: sellerId, amount: 98500 });
     expect(payout.status).toBe(201);
     expect(payout.body.rail).toBe('simulated');
     expect(payout.body.railRef).toBe(`sim_po_${payout.body.id}`);
@@ -85,7 +87,7 @@ describe('sandbox: test-mode keys route to the simulated rail (T4.2)', () => {
   it('a deterministic failure trigger fails the payout WITHOUT moving funds', async () => {
     const auth = `Bearer ${testKey}`;
     const { escrowId, sellerId } = await releasedEscrow(auth);
-    const payout = await http().post('/v1/payouts').set('Authorization', auth)
+    const payout = await http().post('/v1/payouts').set('Authorization', auth).set('Idempotency-Key', randomUUID())
       .send({ escrowId, recipientPartyId: sellerId, amount: 98500, metadata: { simulate: 'failed' } });
     expect(payout.status).toBe(201);
     expect(payout.body).toMatchObject({ rail: 'simulated', status: 'failed' });
@@ -98,7 +100,7 @@ describe('sandbox: test-mode keys route to the simulated rail (T4.2)', () => {
   it('parity: a live-key payout runs the identical flow (here no live rail → pending, but still posts)', async () => {
     const auth = `Bearer ${liveKey}`;
     const { escrowId, sellerId } = await releasedEscrow(auth);
-    const payout = await http().post('/v1/payouts').set('Authorization', auth).send({ escrowId, recipientPartyId: sellerId, amount: 98500 });
+    const payout = await http().post('/v1/payouts').set('Authorization', auth).set('Idempotency-Key', randomUUID()).send({ escrowId, recipientPartyId: sellerId, amount: 98500 });
     expect(payout.status).toBe(201);
     expect(payout.body.rail).toBeNull();
     expect(payout.body.status).toBe('pending');

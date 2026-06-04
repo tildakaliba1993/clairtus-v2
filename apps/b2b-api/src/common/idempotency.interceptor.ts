@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   CallHandler,
   ConflictException,
   ExecutionContext,
@@ -6,9 +7,11 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
 import { type Observable, of, mergeMap } from 'rxjs';
 import { SQL, type SqlExecutor } from '../db/sql';
+import { REQUIRE_IDEMPOTENCY_KEY } from './idempotency.decorator';
 
 /**
  * Enforces invariant #3 — money ops are idempotent. For any mutating request carrying an
@@ -18,7 +21,10 @@ import { SQL, type SqlExecutor } from '../db/sql';
  */
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
-  constructor(@Inject(SQL) private readonly sql: SqlExecutor) {}
+  constructor(
+    @Inject(SQL) private readonly sql: SqlExecutor,
+    private readonly reflector: Reflector,
+  ) {}
 
   async intercept(ctx: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
     const http = ctx.switchToHttp();
@@ -28,6 +34,17 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const mutating = req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE';
     const key: string | undefined = req.headers['idempotency-key'];
     const tenantId: string | undefined = req.tenant?.tenantId;
+
+    // Money-moving routes are marked @RequireIdempotencyKey() — reject them with 400 when the
+    // header is absent, so a retried request can never double-move money by omitting the key.
+    const required = this.reflector.getAllAndOverride<boolean>(REQUIRE_IDEMPOTENCY_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
+    if (required && !key) {
+      throw new BadRequestException('Idempotency-Key header is required for this operation');
+    }
+
     if (!mutating || !key || !tenantId) return next.handle();
 
     const requestHash = createHash('sha256')

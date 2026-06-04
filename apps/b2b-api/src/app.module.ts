@@ -1,5 +1,6 @@
-import { Module } from '@nestjs/common';
-import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { Module, ValidationPipe } from '@nestjs/common';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { Tenancy } from '@clairtus/tenancy';
 import { AppController } from './app.controller';
 import { SystemController } from './system/system.controller';
@@ -17,6 +18,7 @@ import { SmileIdProvider, type KycProvider } from '@clairtus/kyc';
 import { SQL, RAIL, SIMULATED_RAIL, FETCH, KYC_PROVIDER, KYC_CALLBACK_URL, KYC_RELEASE_THRESHOLD, UNCONFIGURED_SQL, type SqlExecutor } from './db/sql';
 import { connectPostgres } from './db/postgres';
 import { ApiKeyGuard } from './common/api-key.guard';
+import { ApiKeyThrottlerGuard } from './common/throttler.guard';
 import { IdempotencyInterceptor } from './common/idempotency.interceptor';
 import { HttpErrorFilter } from './common/http-error.filter';
 
@@ -50,6 +52,15 @@ function kycFromEnv(): KycProvider | null {
 }
 
 @Module({
+  imports: [
+    // Per-API-key rate limiting (env-tunable). Default 300 requests / 60s.
+    ThrottlerModule.forRoot([
+      {
+        ttl: Number(process.env.THROTTLE_TTL ?? 60_000),
+        limit: Number(process.env.THROTTLE_LIMIT ?? 300),
+      },
+    ]),
+  ],
   controllers: [
     AppController,
     SystemController,
@@ -77,10 +88,22 @@ function kycFromEnv(): KycProvider | null {
     EscrowService,
     WebhookService,
     KycService,
-    // Cross-cutting: auth on every route, idempotent money ops, one error envelope.
+    // Cross-cutting (order matters for guards): authenticate + authorize (scopes) FIRST so the
+    // throttler can key off the resolved API key; then rate-limit; then idempotent money ops; one
+    // error envelope; and a global ValidationPipe rejecting malformed payloads with 422.
     { provide: APP_GUARD, useClass: ApiKeyGuard },
+    { provide: APP_GUARD, useClass: ApiKeyThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
     { provide: APP_FILTER, useClass: HttpErrorFilter },
+    {
+      provide: APP_PIPE,
+      useValue: new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+        errorHttpStatusCode: 422,
+      }),
+    },
   ],
 })
 export class AppModule {}

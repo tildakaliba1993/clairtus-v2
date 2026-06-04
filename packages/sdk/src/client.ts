@@ -60,10 +60,20 @@ export class ClairtusClient {
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown, opts?: RequestOptions): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    opts?: RequestOptions,
+    autoIdempotency = false,
+  ): Promise<T> {
     const headers: Record<string, string> = { Authorization: `Bearer ${this.apiKey}` };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    if (opts?.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+    // Money-moving POSTs require an Idempotency-Key; if the caller didn't supply one, generate a
+    // per-call key so a single logical call is safe to retry. (Reuse your own key across manual
+    // retries by passing opts.idempotencyKey.)
+    const idempotencyKey = opts?.idempotencyKey ?? (autoIdempotency ? globalThis.crypto.randomUUID() : undefined);
+    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
 
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
@@ -88,15 +98,15 @@ export class ClairtusClient {
     create: (input: CreateEscrowInput, opts?: RequestOptions) => this.request('POST', '/escrows', input, opts),
     list: () => this.request('GET', '/escrows'),
     get: (id: string) => this.request('GET', `/escrows/${id}`),
-    fund: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/fund`, {}, opts),
-    release: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/release`, {}, opts),
-    refund: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/refund`, {}, opts),
+    fund: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/fund`, {}, opts, true),
+    release: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/release`, {}, opts, true),
+    refund: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/refund`, {}, opts, true),
     cancel: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/cancel`, {}, opts),
     dispute: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/dispute`, {}, opts),
   };
 
   readonly payouts = {
-    create: (input: CreatePayoutInput, opts?: RequestOptions) => this.request('POST', '/payouts', input, opts),
+    create: (input: CreatePayoutInput, opts?: RequestOptions) => this.request('POST', '/payouts', input, opts, true),
     list: () => this.request('GET', '/payouts'),
     get: (id: string) => this.request('GET', `/payouts/${id}`),
   };
