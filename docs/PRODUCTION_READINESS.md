@@ -101,15 +101,16 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 
 ## 6. API & developer experience
 
-- 🟡 **List endpoints aren't truly paginated** — `escrows`/`payouts`/`ledger` use a `limit` only; the cursor
-  pagination utility isn't applied. Will break at scale.
-- 🟡 **OpenAPI is thin** — DTOs are interfaces, so `/docs` shows endpoints with empty request/response schemas.
-  Convert DTOs to decorated classes (`@ApiProperty`).
-- 🟡 **SDK not distributed** — `@clairtus/sdk` is a workspace package; publish to npm (or a tarball) so partners
-  can install it.
+- ✅ **Cursor pagination (done, Track A M4)** — `escrows`/`payouts`/`ledger` now accept `?limit&cursor` and
+  return `{ data, nextCursor }` (opaque, insert-stable). The SDK exposes `{ limit, cursor }` → `Page<T>`.
+- ✅ **OpenAPI enriched (done, Track A M4)** — DTOs are decorated classes (`@ApiProperty`); `/docs` shows real
+  request schemas, grouped by tag, with the bearer scheme. `openapi:export` dumps the spec for a docs site.
+- ✅ **SDK publish-ready (done, Track A M4)** — `@clairtus/sdk` builds to `dist` (ESM + `.d.ts`) with
+  `publishConfig`; `npm publish` is a one-command operator step (needs the npm token). README + CHANGELOG added.
+- ✅ **Docs hosting ready (done, Track A M4)** — runbook in `DEVELOPER_DOCS.md` + spec export; deploying
+  `developers.clairtus.com` (Redoc on Vercel + DNS) is the remaining operator step.
 - 🟡 **Webhook endpoint management** — partners can't register/view/replay webhook endpoints from the dashboard
-  (only the delivery log is shown).
-- 🟡 **Docs not hosted** — `QUICKSTART.md` exists but `developers.clairtus.com` isn't deployed.
+  (only the delivery log is shown). *(Phase 3.)*
 
 ## 7. Product surfaces
 
@@ -142,7 +143,8 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 2. ✅ Wire the **compliance engine** into escrow create/release (limits + KYC tiers per market) — DONE (M3).
 3. **Self-serve auth + API-key management** in the dashboard (Supabase Auth) — or accept manual onboarding for
    partner #1 and prioritize this for #2+.
-4. **Publish the SDK** + host **docs** (`developers.clairtus.com`); enrich OpenAPI.
+4. ✅ **Publish the SDK** + host **docs** + enrich OpenAPI + cursor pagination — DONE (M4); SDK `npm publish`
+   and `developers.clairtus.com` DNS are the remaining one-step operator actions (runbook in `DEVELOPER_DOCS.md`).
 5. ✅ **CI/CD** (GitHub Actions: typecheck/test on PR; deploy on merge) + **readiness check** — DONE (M1).
    *Still open:* **error tracking** (Sentry) — needs a DSN; deferred to a follow-up.
 

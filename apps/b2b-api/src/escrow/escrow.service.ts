@@ -26,7 +26,19 @@ import type { ApiKeyMode } from '@clairtus/tenancy';
 import { SQL, RAIL, SIMULATED_RAIL, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
 import { ComplianceService } from './compliance';
+import { buildPage, decodeCursor } from '../common/pagination';
 import type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
+
+/** Cursor-pagination query options for list endpoints. */
+export interface ListOptions {
+  limit?: number;
+  cursor?: string;
+}
+/** Clamp a requested page size into a safe range (default 50, max 100). */
+function pageLimit(limit?: number): number {
+  if (!limit || !Number.isFinite(limit) || limit <= 0) return 50;
+  return Math.min(Math.floor(limit), 100);
+}
 
 export type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
 
@@ -309,41 +321,53 @@ export class EscrowService {
     return { data: balances };
   }
 
-  async listLedger(tenantId: string, limit = 50) {
+  async listLedger(tenantId: string, opts: ListOptions = {}) {
+    const limit = pageLimit(opts.limit);
+    const cur = opts.cursor ? decodeCursor(opts.cursor) : null;
+    const where = cur ? `and (e.created_at, e.id) < ($3, $4)` : ``;
+    const params = cur ? [tenantId, limit + 1, cur.createdAt, cur.id] : [tenantId, limit + 1];
     const { rows } = await this.sql.query<Record<string, unknown>>(
       `select e.id, e.account_id, e.direction, e.amount, e.created_at, pg.reference, pg.escrow_id
        from ledger_entries e
        join ledger_posting_groups pg on pg.id = e.posting_group_id
-       where pg.tenant_id = $1
+       where pg.tenant_id = $1 ${where}
        order by e.created_at desc, e.id desc
        limit $2`,
-      [tenantId, limit],
+      params,
     );
-    return { data: rows.map((r: any) => ({ id: r.id, accountId: r.account_id, direction: r.direction, amount: num(r.amount), reference: r.reference, escrowId: r.escrow_id, createdAt: r.created_at })) };
+    const data = rows.map((r: any) => ({ id: r.id as string, accountId: r.account_id, direction: r.direction, amount: num(r.amount), reference: r.reference, escrowId: r.escrow_id, createdAt: r.created_at as string }));
+    return buildPage(data, limit);
   }
 
   // ---- lists -------------------------------------------------------------
 
-  async listEscrows(tenantId: string, limit = 50) {
+  async listEscrows(tenantId: string, opts: ListOptions = {}) {
+    const limit = pageLimit(opts.limit);
+    const cur = opts.cursor ? decodeCursor(opts.cursor) : null;
+    const where = cur ? `and (created_at, id) < ($3, $4)` : ``;
+    const params = cur ? [tenantId, limit + 1, cur.createdAt, cur.id] : [tenantId, limit + 1];
     const { rows } = await this.sql.query<EscrowRow>(
-      `select * from escrows where tenant_id = $1 order by created_at desc, id desc limit $2`,
-      [tenantId, limit],
+      `select * from escrows where tenant_id = $1 ${where} order by created_at desc, id desc limit $2`,
+      params,
     );
-    return { data: rows.map((r) => this.toEscrowDto(r)) };
+    return buildPage(rows.map((r) => this.toEscrowDto(r)), limit);
   }
 
-  async listPayouts(tenantId: string, limit = 50) {
+  async listPayouts(tenantId: string, opts: ListOptions = {}) {
+    const limit = pageLimit(opts.limit);
+    const cur = opts.cursor ? decodeCursor(opts.cursor) : null;
+    const where = cur ? `and (created_at, id) < ($3, $4)` : ``;
+    const params = cur ? [tenantId, limit + 1, cur.createdAt, cur.id] : [tenantId, limit + 1];
     const { rows } = await this.sql.query<Record<string, unknown>>(
       `select id, escrow_id, recipient_party_id, amount, currency, rail, rail_ref, status, created_at
-       from payouts where tenant_id = $1 order by created_at desc, id desc limit $2`,
-      [tenantId, limit],
+       from payouts where tenant_id = $1 ${where} order by created_at desc, id desc limit $2`,
+      params,
     );
-    return {
-      data: rows.map((r: any) => ({
-        id: r.id, escrowId: r.escrow_id, recipientPartyId: r.recipient_party_id, amount: num(r.amount),
-        currency: r.currency, rail: r.rail, railRef: r.rail_ref, status: r.status, createdAt: r.created_at,
-      })),
-    };
+    const data = rows.map((r: any) => ({
+      id: r.id as string, escrowId: r.escrow_id, recipientPartyId: r.recipient_party_id, amount: num(r.amount),
+      currency: r.currency, rail: r.rail, railRef: r.rail_ref, status: r.status, createdAt: r.created_at as string,
+    }));
+    return buildPage(data, limit);
   }
 
   // ---- internals ---------------------------------------------------------
