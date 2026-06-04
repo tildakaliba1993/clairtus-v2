@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
 import { Scopes, SCOPES } from '../common/scopes';
@@ -6,6 +7,8 @@ import { RequireIdempotencyKey } from '../common/idempotency.decorator';
 import { EscrowService } from './escrow.service';
 import { CreateEscrowDto } from './escrow.dto';
 
+@ApiTags('escrows')
+@ApiBearerAuth('api-key')
 @Controller('escrows')
 export class EscrowController {
   constructor(private readonly svc: EscrowService) {}
@@ -17,8 +20,8 @@ export class EscrowController {
   }
 
   @Get()
-  list(@CurrentTenant() t: AuthContext) {
-    return this.svc.listEscrows(t.tenantId);
+  list(@CurrentTenant() t: AuthContext, @Query('limit') limit?: string, @Query('cursor') cursor?: string) {
+    return this.svc.listEscrows(t.tenantId, { limit: limit ? Number(limit) : undefined, cursor });
   }
 
   @Get(':id')

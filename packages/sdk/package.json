@@ -1,15 +1,37 @@
 {
   "name": "@clairtus/sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Typed TypeScript client for the Clairtus B2B Escrow API (escrows, parties, payouts, KYC, balances, webhooks).",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tildakaliba1993/clairtus-v2.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://developers.clairtus.com",
+  "keywords": ["clairtus", "escrow", "payments", "fintech", "sdk", "api-client"],
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts"
   },
+  "files": ["dist", "README.md", "CHANGELOG.md"],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "pnpm run build"
   }
 }

@@ -41,6 +41,17 @@ export interface CreateKycCheckInput {
   level?: 'biometric' | 'document';
 }
 
+/** Cursor-pagination query for list endpoints. */
+export interface ListParams {
+  limit?: number;
+  cursor?: string;
+}
+/** A page of results. Pass `nextCursor` back as `cursor` to fetch the next page (null = last page). */
+export interface Page<T> {
+  data: T[];
+  nextCursor: string | null;
+}
+
 /** Thrown on any non-2xx response, carrying the API's error envelope. */
 export class ClairtusApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
@@ -89,6 +100,15 @@ export class ClairtusClient {
     return json as T;
   }
 
+  /** Build a `?limit=&cursor=` query string from list params (empty when none). */
+  private qs(params?: ListParams): string {
+    const q = new URLSearchParams();
+    if (params?.limit !== undefined) q.set('limit', String(params.limit));
+    if (params?.cursor) q.set('cursor', params.cursor);
+    const s = q.toString();
+    return s ? `?${s}` : '';
+  }
+
   readonly parties = {
     create: (input: CreatePartyInput, opts?: RequestOptions) => this.request('POST', '/parties', input, opts),
     get: (id: string) => this.request('GET', `/parties/${id}`),
@@ -96,7 +116,7 @@ export class ClairtusClient {
 
   readonly escrows = {
     create: (input: CreateEscrowInput, opts?: RequestOptions) => this.request('POST', '/escrows', input, opts),
-    list: () => this.request('GET', '/escrows'),
+    list: <T = unknown>(params?: ListParams) => this.request<Page<T>>('GET', `/escrows${this.qs(params)}`),
     get: (id: string) => this.request('GET', `/escrows/${id}`),
     fund: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/fund`, {}, opts, true),
     release: (id: string, opts?: RequestOptions) => this.request('POST', `/escrows/${id}/release`, {}, opts, true),
@@ -107,7 +127,7 @@ export class ClairtusClient {
 
   readonly payouts = {
     create: (input: CreatePayoutInput, opts?: RequestOptions) => this.request('POST', '/payouts', input, opts, true),
-    list: () => this.request('GET', '/payouts'),
+    list: <T = unknown>(params?: ListParams) => this.request<Page<T>>('GET', `/payouts${this.qs(params)}`),
     get: (id: string) => this.request('GET', `/payouts/${id}`),
   };
 
@@ -126,5 +146,5 @@ export class ClairtusClient {
   };
 
   balances = () => this.request('GET', '/balances');
-  ledger = () => this.request('GET', '/ledger');
+  ledger = <T = unknown>(params?: ListParams) => this.request<Page<T>>('GET', `/ledger${this.qs(params)}`);
 }

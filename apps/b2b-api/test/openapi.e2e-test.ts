@@ -36,5 +36,12 @@ describe('OpenAPI document', () => {
     ]));
     // Bearer security scheme is declared.
     expect(doc.components?.securitySchemes).toHaveProperty('api-key');
+
+    // Request bodies have real schemas derived from the decorated DTOs (not empty).
+    const escrowSchema = doc.components?.schemas?.['CreateEscrowDto'] as { properties?: Record<string, unknown> } | undefined;
+    expect(escrowSchema?.properties).toBeDefined();
+    expect(escrowSchema?.properties).toHaveProperty('baseAmount');
+    expect(escrowSchema?.properties).toHaveProperty('feeResponsibility');
+    expect(escrowSchema?.properties).toHaveProperty('sellerPartyId');
   });
 });

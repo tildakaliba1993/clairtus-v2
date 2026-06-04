@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, Post } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
 import { Public } from '../common/public.decorator';
@@ -6,6 +7,8 @@ import { Scopes, SCOPES } from '../common/scopes';
 import { KycService } from './kyc.service';
 import { CreateKycCheckDto } from './kyc.dto';
 
+@ApiTags('kyc')
+@ApiBearerAuth('api-key')
 @Controller('kyc')
 export class KycController {
   constructor(private readonly svc: KycService) {}
