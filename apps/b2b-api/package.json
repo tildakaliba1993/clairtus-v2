@@ -9,7 +9,8 @@
     "start": "node --import @swc-node/register/esm-register src/main.ts",
     "migrate": "node --import tsx scripts/migrate.ts",
     "webhook-worker": "node --import tsx scripts/webhook-worker.ts",
-    "onboard": "node --import tsx scripts/onboard.ts"
+    "onboard": "node --import tsx scripts/onboard.ts",
+    "demo": "node --import tsx scripts/demo-escrow.ts"
   },
   "dependencies": {
     "@swc-node/register": "^1.10.9",
