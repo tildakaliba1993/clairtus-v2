@@ -4,6 +4,7 @@ import { ModeBadge } from './ModeBadge';
 import { BalanceCards } from './BalanceCards';
 import { EscrowTable } from './EscrowTable';
 import { WebhookDeliveryTable } from './WebhookDeliveryTable';
+import { KeyManager } from './KeyManager';
 
 describe('ModeBadge', () => {
   it('labels sandbox vs live distinctly', () => {
@@ -52,5 +53,21 @@ describe('WebhookDeliveryTable', () => {
     expect(screen.getByText('escrow.funded')).toBeTruthy();
     expect(screen.getByText('payout.failed')).toBeTruthy();
     expect(screen.getByText('5')).toBeTruthy();
+  });
+});
+
+describe('KeyManager', () => {
+  it('lists keys (by last4 + scopes), offers create + a revoke action for active keys', () => {
+    render(<KeyManager initialKeys={[
+      { id: 'k1', mode: 'live', last4: 'AB12', scopes: ['escrows:write'], createdAt: '2026-06-03', revokedAt: null, active: true },
+      { id: 'k2', mode: 'test', last4: 'CD34', scopes: [], createdAt: '2026-06-02', revokedAt: '2026-06-03', active: false },
+    ]} />);
+    expect(screen.getByText('…AB12')).toBeTruthy();
+    expect(screen.getAllByText('escrows:write').length).toBeGreaterThan(0); // checkbox + key row
+    expect(screen.getByText('Create key')).toBeTruthy();
+    expect(screen.getByLabelText('keys:write')).toBeTruthy();
+    // Active key has a Revoke button; the revoked one does not.
+    expect(screen.getAllByText('Revoke')).toHaveLength(1);
+    expect(screen.getByText('revoked')).toBeTruthy();
   });
 });
