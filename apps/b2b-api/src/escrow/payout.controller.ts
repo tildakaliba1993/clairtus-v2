@@ -1,13 +1,18 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
-import { EscrowService, type CreatePayoutDto } from './escrow.service';
+import { Scopes, SCOPES } from '../common/scopes';
+import { RequireIdempotencyKey } from '../common/idempotency.decorator';
+import { EscrowService } from './escrow.service';
+import { CreatePayoutDto } from './escrow.dto';
 
 @Controller('payouts')
 export class PayoutController {
   constructor(private readonly svc: EscrowService) {}
 
   @Post()
+  @Scopes(SCOPES.payoutsWrite)
+  @RequireIdempotencyKey()
   create(@CurrentTenant() t: AuthContext, @Body() body: CreatePayoutDto) {
     return this.svc.createPayout(t.tenantId, body, t.mode);
   }

@@ -25,31 +25,9 @@ import type { PaymentRail } from '@clairtus/payments';
 import type { ApiKeyMode } from '@clairtus/tenancy';
 import { SQL, RAIL, SIMULATED_RAIL, KYC_RELEASE_THRESHOLD, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
+import type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
 
-export interface CreatePartyDto {
-  role: string;
-  name?: string;
-  phone?: string;
-  accountRef?: string;
-  bankCode?: string;
-}
-export interface CreateEscrowDto {
-  baseAmount: number;
-  currency: string;
-  feeBps: number;
-  feeResponsibility: FeeResponsibility;
-  buyerPartyId?: string;
-  sellerPartyId: string;
-  secondaryPartyId?: string;
-  secondaryAmount?: number;
-}
-export interface CreatePayoutDto {
-  escrowId: string;
-  recipientPartyId: string;
-  amount: number;
-  /** Sandbox only: { simulate: 'succeeded' | 'failed' | 'pending' } drives the simulated rail. */
-  metadata?: Record<string, unknown>;
-}
+export type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
 
 interface EscrowRow {
   id: string; status: EscrowStatus; base_amount: string | number; currency: string;

@@ -5,6 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
 import { ClairtusClient, ClairtusApiError } from '@clairtus/sdk';
 import { AppModule } from '../src/app.module';
+import { DEFAULT_WRITE_SCOPES } from '../src/common/scopes';
 import { SQL, FETCH } from '../src/db/sql';
 import { applyAllSchema } from '../src/db/schema';
 
@@ -38,7 +39,7 @@ beforeAll(async () => {
   await applyAllSchema(sql);
   const tenancy = new Tenancy(sql);
   const t = await tenancy.createTenant({ name: 'Acme', country: 'ZA' });
-  const apiKey = (await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: [] })).plaintext;
+  const apiKey = (await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(SQL).useValue(sql)

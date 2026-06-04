@@ -2,13 +2,16 @@ import { Body, Controller, Get, Headers, HttpCode, Param, Post } from '@nestjs/c
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
 import { Public } from '../common/public.decorator';
-import { KycService, type CreateKycCheckDto } from './kyc.service';
+import { Scopes, SCOPES } from '../common/scopes';
+import { KycService } from './kyc.service';
+import { CreateKycCheckDto } from './kyc.dto';
 
 @Controller('kyc')
 export class KycController {
   constructor(private readonly svc: KycService) {}
 
   @Post('checks')
+  @Scopes(SCOPES.kycWrite)
   create(@CurrentTenant() t: AuthContext, @Body() body: CreateKycCheckDto) {
     return this.svc.createCheck(t.tenantId, body);
   }

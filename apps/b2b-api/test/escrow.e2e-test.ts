@@ -2,10 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
 import type { PaymentRail } from '@clairtus/payments';
 import { AppModule } from '../src/app.module';
+import { DEFAULT_WRITE_SCOPES } from '../src/common/scopes';
 import { SQL, RAIL } from '../src/db/sql';
 import { applyAllSchema } from '../src/db/schema';
 
@@ -55,8 +57,8 @@ beforeAll(async () => {
   const tenancy = new Tenancy(sql);
   const a = await tenancy.createTenant({ name: 'A', country: 'ZA' });
   const b = await tenancy.createTenant({ name: 'B', country: 'ZA' });
-  keyA = (await tenancy.issueApiKey({ tenantId: a.id, mode: 'live', scopes: [] })).plaintext;
-  keyB = (await tenancy.issueApiKey({ tenantId: b.id, mode: 'live', scopes: [] })).plaintext;
+  keyA = (await tenancy.issueApiKey({ tenantId: a.id, mode: 'live', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
+  keyB = (await tenancy.issueApiKey({ tenantId: b.id, mode: 'live', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(SQL).useValue(sql)
@@ -86,7 +88,7 @@ describe('full escrow lifecycle via API (SELLER fee)', () => {
     expect(created.body.status).toBe('DRAFT');
     const escrowId = created.body.id;
 
-    const funded = await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', authA());
+    const funded = await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', authA()).set('Idempotency-Key', randomUUID());
     expect(funded.status).toBe(200);
     expect(funded.body.status).toBe('FUNDED');
     expect(funded.body.depositAmount).toBe(100000); // SELLER pays base only
@@ -94,7 +96,7 @@ describe('full escrow lifecycle via API (SELLER fee)', () => {
     let balances = (await http().get('/v1/balances').set('Authorization', authA())).body;
     expect(balOf(balances, 'escrow_held')).toBe(100000);
 
-    const released = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', authA());
+    const released = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', authA()).set('Idempotency-Key', randomUUID());
     expect(released.status).toBe(200);
     expect(released.body.status).toBe('RELEASED');
 
@@ -103,7 +105,7 @@ describe('full escrow lifecycle via API (SELLER fee)', () => {
     expect(balOf(balances, 'recipient_payable', seller.id)).toBe(98500);
     expect(balOf(balances, 'clairtus_revenue')).toBe(1500);
 
-    const payout = await http().post('/v1/payouts').set('Authorization', authA())
+    const payout = await http().post('/v1/payouts').set('Authorization', authA()).set('Idempotency-Key', randomUUID())
       .send({ escrowId, recipientPartyId: seller.id, amount: 98500 });
     expect(payout.status).toBe(201);
     expect(payout.body).toMatchObject({ status: 'succeeded', rail: 'simulated', railRef: `sim-${payout.body.id}` });
@@ -127,8 +129,8 @@ describe('refund path', () => {
     const escrowId = (await http().post('/v1/escrows').set('Authorization', authA()).send({
       baseAmount: 50000, currency: 'ZAR', feeBps: 0, feeResponsibility: 'SELLER', sellerPartyId: seller.id,
     })).body.id;
-    await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', authA());
-    const refunded = await http().post(`/v1/escrows/${escrowId}/refund`).set('Authorization', authA());
+    await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', authA()).set('Idempotency-Key', randomUUID());
+    const refunded = await http().post(`/v1/escrows/${escrowId}/refund`).set('Authorization', authA()).set('Idempotency-Key', randomUUID());
     expect(refunded.status).toBe(200);
     expect(refunded.body.status).toBe('REFUNDED');
     const e = await http().get(`/v1/escrows/${escrowId}`).set('Authorization', authA());
@@ -151,7 +153,7 @@ describe('guards & invariants', () => {
     const escrowId = (await http().post('/v1/escrows').set('Authorization', authA()).send({
       baseAmount: 1000, currency: 'ZAR', feeBps: 0, feeResponsibility: 'SELLER', sellerPartyId: seller.id,
     })).body.id;
-    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', authA());
+    const res = await http().post(`/v1/escrows/${escrowId}/release`).set('Authorization', authA()).set('Idempotency-Key', randomUUID());
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('conflict');
   });
@@ -161,9 +163,9 @@ describe('guards & invariants', () => {
     const escrowId = (await http().post('/v1/escrows').set('Authorization', authA()).send({
       baseAmount: 1000, currency: 'ZAR', feeBps: 0, feeResponsibility: 'SELLER', sellerPartyId: seller.id,
     })).body.id;
-    await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', authA());
+    await http().post(`/v1/escrows/${escrowId}/fund`).set('Authorization', authA()).set('Idempotency-Key', randomUUID());
     // Nothing released yet → recipient is owed 0.
-    const res = await http().post('/v1/payouts').set('Authorization', authA())
+    const res = await http().post('/v1/payouts').set('Authorization', authA()).set('Idempotency-Key', randomUUID())
       .send({ escrowId, recipientPartyId: seller.id, amount: 500 });
     expect(res.status).toBe(422);
   });

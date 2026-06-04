@@ -6,14 +6,12 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { KycProvider, KycLevel } from '@clairtus/kyc';
+import type { KycProvider } from '@clairtus/kyc';
 import { SQL, KYC_PROVIDER, KYC_CALLBACK_URL, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
+import type { CreateKycCheckDto } from './kyc.dto';
 
-export interface CreateKycCheckDto {
-  partyId: string;
-  level?: KycLevel;
-}
+export type { CreateKycCheckDto } from './kyc.dto';
 
 @Injectable()
 export class KycService {
