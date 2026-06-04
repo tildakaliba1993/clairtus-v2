@@ -17,8 +17,10 @@ import { WebhookService } from './webhooks/webhook.service';
 import { KycController } from './kyc/kyc.controller';
 import { KycService } from './kyc/kyc.service';
 import { SimulatedRail, KorapayRail, type PaymentRail } from '@clairtus/payments';
+import { JobQueue } from '@clairtus/queue';
+import { buildPayoutRouters } from './escrow/payout-dispatch';
 import { SmileIdProvider, type KycProvider } from '@clairtus/kyc';
-import { SQL, RAIL, SIMULATED_RAIL, FETCH, KYC_PROVIDER, KYC_CALLBACK_URL, KYC_RELEASE_THRESHOLD, UNCONFIGURED_SQL, type SqlExecutor } from './db/sql';
+import { SQL, RAIL, SIMULATED_RAIL, PAYOUT_ROUTERS, JOB_QUEUE, FETCH, KYC_PROVIDER, KYC_CALLBACK_URL, KYC_RELEASE_THRESHOLD, UNCONFIGURED_SQL, type SqlExecutor } from './db/sql';
 import { connectPostgres } from './db/postgres';
 import { ApiKeyGuard } from './common/api-key.guard';
 import { ApiKeyThrottlerGuard } from './common/throttler.guard';
@@ -82,6 +84,10 @@ function kycFromEnv(): KycProvider | null {
     { provide: RAIL, useFactory: liveRailFromEnv },
     // Sandbox rail for test-mode keys — always available (deterministic, no network).
     { provide: SIMULATED_RAIL, useValue: new SimulatedRail() },
+    // Per-mode payout routers (breaker + failover): live rails for live keys, simulated for test keys.
+    { provide: PAYOUT_ROUTERS, useFactory: (live: PaymentRail | null, sim: PaymentRail | null) => buildPayoutRouters(live, sim), inject: [RAIL, SIMULATED_RAIL] },
+    // Durable queue (retry + DLQ) backing async payout dispatch when rails are unavailable.
+    { provide: JOB_QUEUE, useFactory: (sql: SqlExecutor) => new JobQueue(sql), inject: [SQL] },
     // fetch used for outbound webhook delivery (overridden with a fake in tests).
     { provide: FETCH, useValue: globalThis.fetch },
     // KYC: Smile ID when configured; releases above the threshold (minor units) require a VERIFIED seller.

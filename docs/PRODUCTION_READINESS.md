@@ -44,8 +44,9 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 - 🔴 **Live rail not wired in prod**: `KORAPAY_SECRET_KEY` not set on Fly; payouts only work in sandbox.
 - 🔴 **Static egress IP for Korapay Live** not provisioned/whitelisted — live payouts will 403 without it
   (proven in E2/T2.3). Fly machines share egress IPs; need a dedicated/static egress + Korapay allowlist.
-- 🟡 **Payouts bypass the RailRouter** — `EscrowService.createPayout` picks one rail by key mode; it does
-  **not** use `RailRouter.run()`, so the **circuit breaker + failover we built are not in the money path**.
+- ✅ **Payouts via RailRouter (done, Track B M8).** `createPayout` disburses through a per-mode
+  `RailRouter.run()` — circuit breaker + failover now in the money path. If every eligible rail is down,
+  the payout is **enqueued for durable retry** (queue + DLQ) and funds aren't moved until a dispatch succeeds.
 - 🟡 **No settlement/reconciliation reports** (ledger ↔ Korapay balance reconciliation).
 - 🟢 Multi-currency / live FX in B2B flows; per-transaction segregated virtual accounts (Fincra).
 
@@ -89,10 +90,12 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 
 ## 5. Reliability & operations
 
-- 🟡 **Webhook retry worker not scheduled** — `webhook-worker` script exists but no Fly scheduled machine/cron
-  runs it, so failed webhook deliveries aren't retried in prod.
-- 🟡 **Durable queue (DLQ) not wired** — `@clairtus/queue` is migrated but no flow enqueues; pay-in/payout/
-  webhook processing is synchronous/best-effort, not durable.
+- ✅ **Background worker (done, Track B M8).** The `webhook-worker` now drains **both** due webhook
+  deliveries **and** the durable payout-dispatch queue; supports `--loop` for a single always-on Fly
+  machine (see `DEPLOYMENT.md §5`). *(Operator: provision the scheduled/always-on machine.)*
+- ✅ **Durable queue + DLQ wired (done, Track B M8).** `@clairtus/queue` now backs **payout dispatch**
+  when rails are unavailable (retry with backoff → dead-letter after max attempts); the jobs table is
+  part of the prod schema/migrations.
 - 🟡 **Observability partial** — structured logs + correlation IDs + ✅ **error tracking (Sentry, M5)** wired
   (no-op until `SENTRY_DSN` is set, reports 5xx with the correlation id). Still missing: OpenTelemetry
   exporter, log aggregation/metrics/dashboards, **alerting** (tracked in Track B M11).
@@ -156,7 +159,7 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 **Track B — unlock REAL money (heavier, partly external):**
 6. ✅ **real pay-in collection** (Korapay charge) — DONE (M6); **inbound rail webhook handler** (M7) drives
    the lifecycle to `FUNDED` when the charge settles.
-7. Route **payouts through `RailRouter`** (failover + breakers); **wire the durable queue + DLQ** + schedule the
+7. ✅ Route **payouts through `RailRouter`** (failover + breakers) + **durable queue + DLQ** + the worker that
    webhook worker.
 8. **Korapay live**: confirm custody (b)/(d) in writing, set live keys, provision **static egress IP** + allowlist.
 9. **Legal**: licensing posture sign-off + partner contracts/DPA; audit log; AML/FICA basics.

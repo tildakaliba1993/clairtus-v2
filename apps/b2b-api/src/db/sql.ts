@@ -9,6 +9,12 @@ export const RAIL = 'PAYMENT_RAIL';
 /** DI token for the sandbox rail used by test-mode keys (deterministic, no network). */
 export const SIMULATED_RAIL = 'SIMULATED_RAIL';
 
+/** DI token for the per-mode payout RailRouters (`{ live, sandbox }`) — breaker + failover in the money path. */
+export const PAYOUT_ROUTERS = 'PAYOUT_ROUTERS';
+
+/** DI token for the durable JobQueue (retry + DLQ) backing async payout dispatch. */
+export const JOB_QUEUE = 'JOB_QUEUE';
+
 /** DI token for the fetch implementation used to deliver outbound webhooks (overridable in tests). */
 export const FETCH = 'FETCH_IMPL';
 

@@ -1,5 +1,6 @@
 import { TENANCY_SCHEMA, tenantRlsSql, type SqlExecutor } from '@clairtus/tenancy';
 import { LEDGER_SCHEMA } from '@clairtus/ledger';
+import { JOB_QUEUE_SCHEMA } from '@clairtus/queue';
 import { IDEMPOTENCY_SCHEMA } from './sql';
 
 /**
@@ -167,7 +168,7 @@ export const RLS_TABLES = ['parties', 'escrows', 'payins', 'payouts', 'events', 
  * production runs the equivalent versioned migrations under infra/.
  */
 export async function applyAllSchema(sql: SqlExecutor): Promise<void> {
-  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA, COMPLIANCE_SCHEMA, AUDIT_SCHEMA];
+  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, JOB_QUEUE_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA, COMPLIANCE_SCHEMA, AUDIT_SCHEMA];
   for (const block of blocks) {
     for (const stmt of block.split(';').map((s) => s.trim()).filter(Boolean)) {
       await sql.query(stmt);
