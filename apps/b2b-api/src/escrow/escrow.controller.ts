@@ -34,7 +34,7 @@ export class EscrowController {
   @Scopes(SCOPES.escrowsWrite)
   @RequireIdempotencyKey()
   fund(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
-    return this.svc.fund(t.tenantId, id);
+    return this.svc.fund(t.tenantId, id, t.mode);
   }
 
   @Post(':id/release')

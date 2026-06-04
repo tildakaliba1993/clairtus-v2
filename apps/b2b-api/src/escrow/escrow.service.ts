@@ -95,6 +95,18 @@ export class EscrowService {
     if (rows.length === 0) throw new BadRequestException(`${label} party not found`);
   }
 
+  /** Contact details for a party (for rail pay-in/payout payloads); empty when none/unknown. */
+  private async partyContact(tenantId: string, partyId: string | null): Promise<{ phone?: string; accountRef?: string; name?: string }> {
+    if (!partyId) return {};
+    const { rows } = await this.sql.query<{ phone: string | null; account_ref: string | null; name: string | null }>(
+      `select phone, account_ref, name from parties where id = $1 and tenant_id = $2`,
+      [partyId, tenantId],
+    );
+    const p = rows[0];
+    if (!p) return {};
+    return { phone: p.phone ?? undefined, accountRef: p.account_ref ?? undefined, name: p.name ?? undefined };
+  }
+
   /** The tenant's market (ISO-2 country) — drives per-market compliance rules + KYC tiers. */
   private async tenantCountry(tenantId: string): Promise<string> {
     const { rows } = await this.sql.query<{ country: string | null }>(
@@ -146,14 +158,44 @@ export class EscrowService {
     return this.toEscrowDto(row);
   }
 
-  async fund(tenantId: string, id: string) {
+  async fund(tenantId: string, id: string, mode: ApiKeyMode = 'live') {
     const e = await this.loadEscrow(tenantId, id);
-    // Synchronous sandbox funding: request → confirm, then post the deposit into held.
+    const breakdown = this.breakdown(e);
+
+    // Live mode with a real rail configured → collect real money. Funds are NOT posted now; the escrow
+    // rests at AWAITING_FUNDING until the inbound rail webhook (M7) confirms the charge settled.
+    const liveRail = mode === 'live' ? this.rail : null;
+    if (liveRail) {
+      const status = e.status === 'DRAFT' ? this.transition(e.status, 'REQUEST_FUNDING') : e.status;
+      const country = await this.tenantCountry(tenantId);
+      const payer = await this.partyContact(tenantId, e.buyer_party_id);
+      const res = await liveRail.initiatePayIn({
+        reference: `payin:${id}`,
+        amount: breakdown.depositAmount.amount,
+        currency: e.currency,
+        country,
+        method: 'bank_transfer',
+        payer,
+        metadata: { escrowId: id },
+      });
+      await this.sql.query(
+        `insert into payins (tenant_id, escrow_id, rail, rail_ref, amount, currency, status)
+         values ($1,$2,$3,$4,$5,$6,$7)`,
+        [tenantId, id, liveRail.id, res.railRef, breakdown.depositAmount.amount, e.currency, res.status],
+      );
+      await this.setStatus(tenantId, id, status);
+      await this.audit.record({ tenantId, action: 'escrow.payin_initiated', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { railRef: res.railRef, amount: breakdown.depositAmount.amount } });
+      return {
+        ...(await this.getEscrow(tenantId, id)),
+        payment: { rail: liveRail.id, railRef: res.railRef, status: res.status, instructions: res.instructions ?? null },
+      };
+    }
+
+    // Sandbox / no live rail: synchronous funding (request → confirm, then post the deposit into held).
     let status: EscrowStatus = e.status;
     if (status === 'DRAFT') status = this.transition(status, 'REQUEST_FUNDING');
     status = this.transition(status, 'FUNDING_CONFIRMED');
 
-    const breakdown = this.breakdown(e);
     const external = await this.account(tenantId, 'external', e.currency, null);
     await this.ledger.post(
       buildFundPosting({

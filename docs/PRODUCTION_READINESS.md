@@ -30,9 +30,10 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 
 ## 1. Real money movement (the core escrow function)
 
-- 🔴 **Pay-in is simulated, not collected.** `POST /v1/escrows/:id/fund` posts the deposit straight to the
-  ledger — it does **not** actually collect money from a buyer. Real funding must: create a Korapay
-  collection (bank transfer / card), return payment instructions, and only mark `FUNDED` when the funds land.
+- ✅ **Real pay-in collection (done, Track B M6).** In **live mode with a rail configured**,
+  `POST /v1/escrows/:id/fund` now initiates a Korapay collection, persists a `payins` intent, returns
+  payment instructions, and leaves the escrow at `AWAITING_FUNDING` — it does **not** post to the ledger
+  until the funds land (via the inbound webhook, M7). Test mode keeps the synchronous sandbox flow.
 - 🔴 **No inbound rail webhook handler.** The Korapay adapter can parse/verify webhooks, but there is **no
   endpoint** receiving `charge.success` / `transfer.success` and updating escrow/payout state. Without it,
   real pay-ins and payout confirmations never reconcile. (Build `POST /v1/webhooks/korapay` → verify HMAC →
@@ -152,7 +153,8 @@ _Last updated: 2026-06-04, immediately after first live deploy._
    ✅ **error tracking** (Sentry) + **immutable audit log** — DONE (M5); set `SENTRY_DSN` to activate Sentry.
 
 **Track B — unlock REAL money (heavier, partly external):**
-6. Build **real pay-in collection** (Korapay charge) + **inbound rail webhook handler** → drive the lifecycle.
+6. ✅ **real pay-in collection** (Korapay charge) — DONE (M6); **inbound rail webhook handler** (M7) drives
+   the lifecycle to `FUNDED` when the charge settles.
 7. Route **payouts through `RailRouter`** (failover + breakers); **wire the durable queue + DLQ** + schedule the
    webhook worker.
 8. **Korapay live**: confirm custody (b)/(d) in writing, set live keys, provision **static egress IP** + allowlist.
