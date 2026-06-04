@@ -5,10 +5,9 @@ import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
-import type { PaymentRail } from '@clairtus/payments';
 import { AppModule } from '../src/app.module';
 import { DEFAULT_WRITE_SCOPES } from '../src/common/scopes';
-import { SQL, RAIL } from '../src/db/sql';
+import { SQL } from '../src/db/sql';
 import { applyAllSchema } from '../src/db/schema';
 
 function executor(db: PGlite): SqlExecutor {
@@ -31,17 +30,8 @@ function executor(db: PGlite): SqlExecutor {
   };
 }
 
-// A simulated rail so payouts exercise the rail wiring without any network.
-const fakeRail: PaymentRail = {
-  id: 'simulated',
-  capabilities: { payIn: true, payOut: true, hold: true, countries: ['ZA'], currencies: ['ZAR'], methods: ['bank_transfer'] },
-  async initiatePayIn(req) { return { railRef: req.reference, status: 'pending' }; },
-  async initiatePayout(req) { return { railRef: `sim-${req.reference}`, status: 'succeeded' }; },
-  async getStatus(railRef) { return { railRef, status: 'succeeded' }; },
-  parseWebhook() { return null; },
-  verifyWebhook() { return true; },
-};
-
+// Sandbox lifecycle test: test-mode keys → synchronous funding + the built-in SimulatedRail for payout.
+// (The live, webhook-driven funding path is covered in payin.e2e + webhook.e2e.)
 let app: INestApplication;
 let keyA: string;
 let keyB: string;
@@ -57,12 +47,11 @@ beforeAll(async () => {
   const tenancy = new Tenancy(sql);
   const a = await tenancy.createTenant({ name: 'A', country: 'ZA' });
   const b = await tenancy.createTenant({ name: 'B', country: 'ZA' });
-  keyA = (await tenancy.issueApiKey({ tenantId: a.id, mode: 'live', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
-  keyB = (await tenancy.issueApiKey({ tenantId: b.id, mode: 'live', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
+  keyA = (await tenancy.issueApiKey({ tenantId: a.id, mode: 'test', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
+  keyB = (await tenancy.issueApiKey({ tenantId: b.id, mode: 'test', scopes: DEFAULT_WRITE_SCOPES })).plaintext;
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(SQL).useValue(sql)
-    .overrideProvider(RAIL).useValue(fakeRail)
     .compile();
   app = moduleRef.createNestApplication();
   app.setGlobalPrefix('v1');
@@ -108,7 +97,7 @@ describe('full escrow lifecycle via API (SELLER fee)', () => {
     const payout = await http().post('/v1/payouts').set('Authorization', authA()).set('Idempotency-Key', randomUUID())
       .send({ escrowId, recipientPartyId: seller.id, amount: 98500 });
     expect(payout.status).toBe(201);
-    expect(payout.body).toMatchObject({ status: 'succeeded', rail: 'simulated', railRef: `sim-${payout.body.id}` });
+    expect(payout.body).toMatchObject({ status: 'succeeded', rail: 'simulated', railRef: `sim_po_${payout.body.id}` });
 
     balances = (await http().get('/v1/balances').set('Authorization', authA())).body;
     expect(balOf(balances, 'recipient_payable', seller.id)).toBe(0);

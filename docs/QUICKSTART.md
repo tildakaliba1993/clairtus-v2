@@ -40,8 +40,12 @@ const escrow = await clairtus.escrows.create({
   sellerPartyId: seller.id,
 });
 
-// Fund the escrow (buyer's money is now HELD). Idempotency-Key makes retries safe.
-await clairtus.escrows.fund(escrow.id, { idempotencyKey: `fund-${escrow.id}` });
+// Fund the escrow. Idempotency-Key makes retries safe.
+// - SANDBOX (ck_test_…): settles instantly → escrow is FUNDED immediately.
+// - LIVE (ck_live_…): returns `payment.instructions` (e.g. a virtual account / redirect) for the
+//   buyer to pay; the escrow stays AWAITING_FUNDING until the funds land, then your `escrow.funded`
+//   webhook fires. Show `payment.instructions` to the buyer.
+const funding = await clairtus.escrows.fund(escrow.id, { idempotencyKey: `fund-${escrow.id}` });
 
 // Release when your condition is met (delivery confirmed, etc.).
 await clairtus.escrows.release(escrow.id);

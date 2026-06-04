@@ -39,6 +39,19 @@ create table if not exists escrows (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists payins (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  escrow_id uuid not null,
+  rail text,
+  rail_ref text,
+  amount bigint not null,
+  currency text not null,
+  status text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists payouts (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null,
@@ -147,7 +160,7 @@ create index if not exists audit_log_escrow_idx on audit_log(escrow_id);
 `;
 
 /** Tenant-scoped tables that get the RLS isolation policy. */
-export const RLS_TABLES = ['parties', 'escrows', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries', 'kyc_checks', 'compliance_decisions', 'audit_log'] as const;
+export const RLS_TABLES = ['parties', 'escrows', 'payins', 'payouts', 'events', 'webhook_endpoints', 'webhook_deliveries', 'kyc_checks', 'compliance_decisions', 'audit_log'] as const;
 
 /**
  * Applies the full schema (tenancy + ledger + idempotency + domain + RLS). Used by tests;
