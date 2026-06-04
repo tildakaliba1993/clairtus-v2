@@ -3,20 +3,45 @@
 **Purpose:** lets a fresh session resume with full context. Read this + `PRD.md`,
 `ARCHITECTURE.md`, `IMPLEMENTATION_PLAN.md`, then `git log`.
 
-_Last updated: during E2 (T2.3 in progress)._
+_Last updated: 2026-06-04 — **E0–E5 complete & MVP DEPLOYED LIVE**._
 
 ---
 
-## How to resume in a new session (say this to the assistant)
+## 🟢 SESSION HANDOVER — read this first
 
-> "Read `docs/PROGRESS.md`, `docs/ARCHITECTURE.md`, and `docs/IMPLEMENTATION_PLAN.md`.
-> We're on branch `claude/e2-payment-rails`, mid E2/T2.3. Continue."
+**The full B2B Escrow MVP (E0–E5) is built, merged to `main`, and DEPLOYED LIVE.** All work is on
+`main` (PRs #10–#17 merged). ~190 tests green; the whole monorepo typechecks.
 
-Then the assistant should:
-1. `git fetch && git checkout claude/e2-payment-rails` (worktree: `/Users/cash/clairtus-v2/.claude/worktrees/happy-beaver-5b106d`).
-2. Install + test with **corepack pnpm** (plain `pnpm` is NOT on PATH in fresh shells):
-   `corepack pnpm install` → `corepack pnpm -r --filter "./packages/*" test`.
-3. Continue **T2.3 — Korapay adapter** (details below).
+**Live URLs:**
+- API → `https://clairtus-api.fly.dev` (Fly.io, app `clairtus-api`, region `jnb`, always-on; `/v1/health`,
+  `/docs`). Runs under the **SWC runtime** (`@swc-node/register`) so NestJS DI metadata is emitted —
+  **do not switch the API to tsx**, DI breaks (see commit `f0cd9af`).
+- Dashboard → `https://clairtus-v2-client-dashboard.vercel.app` (Vercel). Connect with a `ck_test_…` key.
+- DB → Supabase Postgres (project `clairtus-b2b`, Frankfurt). `DATABASE_URL` is a Fly secret (transaction
+  pooler, port 6543; our adapter sets `prepare:false`). Schema auto-migrates on each Fly release.
+
+**Operator scripts (run locally with the live `DATABASE_URL` / a key):**
+`pnpm --filter @clairtus/b2b-api onboard --name "X" --country ZA` (create tenant + keys) ·
+`… migrate` · `… webhook-worker` · `CLAIRTUS_API_KEY=ck_test_… … demo` (seed dashboard data).
+
+**▶ NEXT WORK IS DEFINED IN [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md)** — the gap analysis
+of what's missing to be a production-ready, self-serve, design-partner-ready escrow infra, with a
+prioritized next sprint (Track A = sandbox-pilot ready; Track B = real-money go-live).
+
+### How to resume in a new session (say this to the assistant)
+> "Read `docs/PROGRESS.md`, `docs/PRODUCTION_READINESS.md`, `docs/ARCHITECTURE.md`. The MVP is built &
+> deployed live on `main`. Start the next sprint from PRODUCTION_READINESS.md (Track A first)."
+
+Then: work on `main` from `/Users/cash/clairtus-v2`; `corepack pnpm install`; `corepack pnpm -r --filter
+"./packages/*" --filter "./apps/*" test`. Deploy API: `fly deploy --ha=false` (from repo root). Deploy
+dashboard: push to `main` (Vercel auto-deploys; Install Command `pnpm install --frozen-lockfile`, Build
+`next build`, Root Dir `apps/client-dashboard`).
+
+### Known prod gaps that BLOCK real money (full list in PRODUCTION_READINESS.md)
+Pay-in is **simulated** (no real collection); **no inbound rail webhook handler**; **compliance engine not
+wired** into the API; **scopes/idempotency/rate-limit not enforced**; payouts **bypass the RailRouter**;
+durable queue **not wired**; webhook retry worker **not scheduled**; Korapay live keys + **static egress IP**
++ custody (b)/(d) confirmation outstanding; self-serve auth/key-management + CI/CD + hosted docs missing.
 
 ## Environment notes (important)
 - **Use `corepack pnpm …`** — `pnpm` alone isn't on PATH in non-interactive shells. Node 22, pnpm 10.16.1.
@@ -39,7 +64,9 @@ bootstrapped/cash-minimal.
 | **E2** Payment-rail abstraction | ✅ Merged (PR #12) — custody (a)+(c) proven on sandbox; (b)+(d) pending Korapay written sign-off |
 | **E3** Multi-tenancy + B2B API | ✅ Complete (PR open) — T3.1 tenancy · T3.2 NestJS skeleton · T3.3 endpoints (full lifecycle via API) · T3.4 signed webhooks |
 | **E4** KYC + sandbox + docs + SDK | ✅ Complete (PR open) — T4.1 KYC · T4.2 sandbox/simulated rail · T4.3 OpenAPI + typed SDK + quickstart |
-| **E5** Dashboard + hardening + onboarding | ✅ Complete (PR open) — T5.1 dashboard · T5.2 hardening · T5.3 onboarding kit |
+| **E5** Dashboard + hardening + onboarding | ✅ Merged — T5.1 dashboard · T5.2 hardening · T5.3 onboarding kit |
+| **Deploy** API+DB+Dashboard | ✅ **LIVE** — Fly (API) + Supabase (DB) + Vercel (dashboard); see top handover + `DEPLOYMENT.md` |
+| **Next** production-readiness | ⬜ See `PRODUCTION_READINESS.md` — Track A (sandbox pilot) → Track B (real money) |
 
 **🎉 MVP (E0–E5) feature-complete.** 188 tests green. Remaining is the tracked carry-forwards
 (prod Postgres adapter + migrations, webhook cron, Korapay Live IP/custody sign-off, OTel exporter)

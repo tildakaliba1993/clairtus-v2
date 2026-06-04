@@ -1,0 +1,151 @@
+# Production Readiness — Gap Analysis
+
+**Purpose:** an honest assessment of what the B2B Escrow MVP **is** vs. what it still **needs** to be a
+production-ready, **self-serve** escrow infrastructure ready to onboard design partners. This drives the
+next sprint. Read with `PROGRESS.md` (build state) + `ARCHITECTURE.md` + `IMPLEMENTATION_PLAN.md`.
+
+_Last updated: 2026-06-04, immediately after first live deploy._
+
+---
+
+## ✅ What is built & LIVE today
+
+- **API** (`apps/b2b-api`, NestJS) live on Fly.io → `https://clairtus-api.fly.dev` (Johannesburg, always-on,
+  health-checked, auto-migrating on release; runs under the SWC runtime so DI works).
+- **Database**: Supabase Postgres (Frankfurt), full schema migrated (tenants, api_keys, ledger, escrows,
+  parties, payouts, events, webhooks, kyc_checks, idempotency_keys, jobs).
+- **Dashboard** (`apps/client-dashboard`, Next 16) live on Vercel → tenant logs in with an API key and sees
+  balances / escrows / payouts / webhook deliveries (design-system matched).
+- **Domain logic** (all unit/integration tested, ~190 tests): double-entry ledger, fee/split engine, escrow
+  state machine, per-market compliance engine, payment-rail abstraction (PawaPay + Korapay + simulated),
+  KYC (Smile ID) abstraction, tenancy + RLS, signed outbound webhooks, durable queue + circuit breaker, SDK.
+- **Sandbox works end-to-end now**: a test key drives create → fund → release → payout (simulated rail).
+- **Custody (Korapay)**: collect-into-balance (a) and disburse-on-trigger (c) **proven on sandbox**.
+
+> **Bottom line:** a design partner could begin a **sandbox** integration soon. **Real-money go-live needs
+> the 🔴 items below.** Severity: 🔴 = blocker before a partner moves real money · 🟡 = needed for a credible
+> self-serve pilot · 🟢 = post-MVP.
+
+---
+
+## 1. Real money movement (the core escrow function)
+
+- 🔴 **Pay-in is simulated, not collected.** `POST /v1/escrows/:id/fund` posts the deposit straight to the
+  ledger — it does **not** actually collect money from a buyer. Real funding must: create a Korapay
+  collection (bank transfer / card), return payment instructions, and only mark `FUNDED` when the funds land.
+- 🔴 **No inbound rail webhook handler.** The Korapay adapter can parse/verify webhooks, but there is **no
+  endpoint** receiving `charge.success` / `transfer.success` and updating escrow/payout state. Without it,
+  real pay-ins and payout confirmations never reconcile. (Build `POST /v1/webhooks/korapay` → verify HMAC →
+  `NormalizedEvent` → drive the lifecycle.)
+- 🔴 **Korapay custody (b) + (d) unconfirmed in writing** — no forced auto-sweep over a multi-day hold, and
+  how pooled balance funds are treated/segregated. (T2.3 left these open; get it in writing.)
+- 🔴 **Live rail not wired in prod**: `KORAPAY_SECRET_KEY` not set on Fly; payouts only work in sandbox.
+- 🔴 **Static egress IP for Korapay Live** not provisioned/whitelisted — live payouts will 403 without it
+  (proven in E2/T2.3). Fly machines share egress IPs; need a dedicated/static egress + Korapay allowlist.
+- 🟡 **Payouts bypass the RailRouter** — `EscrowService.createPayout` picks one rail by key mode; it does
+  **not** use `RailRouter.run()`, so the **circuit breaker + failover we built are not in the money path**.
+- 🟡 **No settlement/reconciliation reports** (ledger ↔ Korapay balance reconciliation).
+- 🟢 Multi-currency / live FX in B2B flows; per-transaction segregated virtual accounts (Fincra).
+
+## 2. Self-serve onboarding & authentication
+
+- 🔴 **No self-serve signup.** Tenants are created by an operator CLI (`pnpm … onboard`). A self-serve
+  product needs partner sign-up + tenant provisioning.
+- 🔴 **Dashboard has no real auth** — it only "remembers" a pasted API key in a cookie. Needs tenant **user
+  accounts** (Supabase Auth: email/OAuth), sessions, and team membership.
+- 🔴 **No API-key management UI.** Keys are issued only via CLI; partners can't create/rotate/revoke keys, see
+  `last4`, or scope them from the dashboard. (Hashing + revoke exist in `@clairtus/tenancy`; needs UI + routes.)
+- 🟡 **No roles/permissions** within a tenant (admin vs read-only).
+
+## 3. Security hardening
+
+- 🔴 **API-key scopes are NOT enforced.** Keys carry scopes (`escrows:write`, …) but no guard checks them
+  per route — every valid key can do everything. Add a `@Scopes()` decorator + check in `ApiKeyGuard`.
+- 🔴 **Idempotency is optional, not required.** The interceptor only acts when an `Idempotency-Key` header is
+  present; money-moving POSTs should **require** it (architecture mandates this).
+- 🔴 **No rate limiting / throttling** (abuse + brute-force protection). Add `@nestjs/throttler` or edge limits.
+- 🟡 **Thin input validation** — handlers do manual checks; no `class-validator`/`ValidationPipe`, so malformed
+  payloads aren't consistently rejected with 422.
+- 🟡 **No immutable audit log** of money operations / admin actions (architecture §14 requires it).
+- 🟡 **Secrets hygiene**: a DB password and a GitHub PAT were exposed during setup and **rotated** — adopt a
+  secrets policy (managers only, never in logs/chat). CORS is unset (fine while the dashboard calls server-side).
+
+## 4. Compliance (regulatory engine)
+
+- 🔴 **The compliance engine is not wired into the API.** `@clairtus/compliance` (limits, KYC thresholds,
+  velocity/structuring, live FX) is **not imported by `apps/b2b-api`** — escrow creation/funding/release run
+  with **no limit or compliance checks**. This must gate escrow amounts and releases per market (DRC BCC, SA basics).
+- 🔴 **KYC not live**: Smile ID adapter built + release-gating wired, but Smile ID prod creds aren't set, and
+  the gate is a single global threshold, not per-market tiers.
+- 🟡 **No AML / sanctions / PEP screening**; no FICA (SA) program documented.
+- 🟡 **Data retention / POPIA-GDPR** (retention windows, deletion, DPA) not addressed.
+
+## 5. Reliability & operations
+
+- 🟡 **Webhook retry worker not scheduled** — `webhook-worker` script exists but no Fly scheduled machine/cron
+  runs it, so failed webhook deliveries aren't retried in prod.
+- 🟡 **Durable queue (DLQ) not wired** — `@clairtus/queue` is migrated but no flow enqueues; pay-in/payout/
+  webhook processing is synchronous/best-effort, not durable.
+- 🟡 **Observability incomplete** — structured logs + correlation IDs exist, but no OpenTelemetry exporter, no
+  log aggregation/metrics/dashboards, no **error tracking** (Sentry), no **alerting**.
+- 🟡 **No CI/CD** — tests run locally; no GitHub Actions running tests/lint/typecheck on PR, no automated deploy.
+- 🟡 **No staging environment** — only production (sandbox is a *mode*, not a separate deploy).
+- 🟡 **Readiness vs liveness** — `/v1/health` is static; add a readiness check that verifies DB connectivity.
+- 🟡 **Backups / DR** — rely on Supabase defaults; document RPO/RTO and test restore. Single Fly machine (no HA).
+
+## 6. API & developer experience
+
+- 🟡 **List endpoints aren't truly paginated** — `escrows`/`payouts`/`ledger` use a `limit` only; the cursor
+  pagination utility isn't applied. Will break at scale.
+- 🟡 **OpenAPI is thin** — DTOs are interfaces, so `/docs` shows endpoints with empty request/response schemas.
+  Convert DTOs to decorated classes (`@ApiProperty`).
+- 🟡 **SDK not distributed** — `@clairtus/sdk` is a workspace package; publish to npm (or a tarball) so partners
+  can install it.
+- 🟡 **Webhook endpoint management** — partners can't register/view/replay webhook endpoints from the dashboard
+  (only the delivery log is shown).
+- 🟡 **Docs not hosted** — `QUICKSTART.md` exists but `developers.clairtus.com` isn't deployed.
+
+## 7. Product surfaces
+
+- 🟡 **Dashboard is read-only** — no create/manage actions (escrows, parties, keys, webhooks) from the UI.
+- 🟡 **No B2B marketing site** — `clairtus.com` still serves the B2C/DRC (French) site; B2B landing not built.
+- 🟡 **No B2B admin/ops console** — dispute resolution, tenant management, transaction monitoring (the
+  `admin-panel` app serves B2C ops only).
+- 🟡 **Dispute workflow** — the escrow has `DISPUTED` + resolve transitions, but no operational dispute process/UI.
+- 🟢 **Billing / metering** — fee engine computes fees, but no tenant invoicing/settlement/commission payout.
+
+## 8. Legal & regulatory (business, gates go-live)
+
+- 🔴 **Escrow/licensing posture (SA)** — the model assumes Korapay (licensed PSP) holds funds and Clairtus only
+  orchestrates. **Confirm with counsel** that this avoids needing Clairtus's own EME/PSP/escrow-agent licence
+  pre-pilot. This is a fundamental go-live gate.
+- 🔴 **Design-partner contracts + DPA** before live funds.
+- 🟡 **KYC/AML program** documentation aligned to FICA (SA).
+
+## 9. Custom domains (deferred from deploy)
+
+- 🟡 Map `clairtus.com` (marketing), `app.clairtus.com` (dashboard), `api.clairtus.com` (API). Dashboard
+  currently points at `clairtus-api.fly.dev`; switch `CLAIRTUS_API_URL` after DNS. (See `DEPLOYMENT.md`.)
+
+---
+
+## Recommended next sprint (ordered)
+
+**Track A — make a SANDBOX design-partner pilot real (fast, low risk):**
+1. Enforce **scopes** + **required idempotency** on money POSTs; add **rate limiting** + input validation.
+2. Wire the **compliance engine** into escrow create/fund/release (limits + KYC tiers per market).
+3. **Self-serve auth + API-key management** in the dashboard (Supabase Auth) — or accept manual onboarding for
+   partner #1 and prioritize this for #2+.
+4. **Publish the SDK** + host **docs** (`developers.clairtus.com`); enrich OpenAPI.
+5. **CI/CD** (GitHub Actions: test/lint/typecheck on PR; deploy on merge) + **error tracking** + readiness check.
+
+**Track B — unlock REAL money (heavier, partly external):**
+6. Build **real pay-in collection** (Korapay charge) + **inbound rail webhook handler** → drive the lifecycle.
+7. Route **payouts through `RailRouter`** (failover + breakers); **wire the durable queue + DLQ** + schedule the
+   webhook worker.
+8. **Korapay live**: confirm custody (b)/(d) in writing, set live keys, provision **static egress IP** + allowlist.
+9. **Legal**: licensing posture sign-off + partner contracts/DPA; audit log; AML/FICA basics.
+10. Custom domains + B2B marketing/admin surfaces.
+
+**Definition of "design-partner ready (sandbox)":** Tracks A1–A4 done.
+**Definition of "pilot-live ready (real money)":** Track B6–B9 done.
