@@ -34,10 +34,11 @@ _Last updated: 2026-06-04, immediately after first live deploy._
   `POST /v1/escrows/:id/fund` now initiates a Korapay collection, persists a `payins` intent, returns
   payment instructions, and leaves the escrow at `AWAITING_FUNDING` — it does **not** post to the ledger
   until the funds land (via the inbound webhook, M7). Test mode keeps the synchronous sandbox flow.
-- 🔴 **No inbound rail webhook handler.** The Korapay adapter can parse/verify webhooks, but there is **no
-  endpoint** receiving `charge.success` / `transfer.success` and updating escrow/payout state. Without it,
-  real pay-ins and payout confirmations never reconcile. (Build `POST /v1/webhooks/korapay` → verify HMAC →
-  `NormalizedEvent` → drive the lifecycle.)
+- ✅ **Inbound rail webhook handler (done, Track B M7).** Public, HMAC-verified `POST /v1/webhooks/korapay`
+  → `parseWebhook` → `NormalizedEvent` → drives the lifecycle: `charge.success` funds the escrow
+  (AWAITING_FUNDING → FUNDED + ledger post) **exactly once** (idempotent on re-delivery), `charge.failed`
+  marks the pay-in failed, `transfer.success/failed` reconciles the payout + fires the outbound webhook.
+  Forged signature → 401; unknown event → 200-ignored (no retry storm).
 - 🔴 **Korapay custody (b) + (d) unconfirmed in writing** — no forced auto-sweep over a multi-day hold, and
   how pooled balance funds are treated/segregated. (T2.3 left these open; get it in writing.)
 - 🔴 **Live rail not wired in prod**: `KORAPAY_SECRET_KEY` not set on Fly; payouts only work in sandbox.

@@ -12,6 +12,7 @@ import { EscrowService } from './escrow/escrow.service';
 import { ComplianceService, COMPLIANCE_CONFIG, complianceConfigFromEnv } from './escrow/compliance';
 import { AuditService } from './audit/audit.service';
 import { WebhookController } from './webhooks/webhook.controller';
+import { RailWebhookController } from './webhooks/rail.controller';
 import { WebhookService } from './webhooks/webhook.service';
 import { KycController } from './kyc/kyc.controller';
 import { KycService } from './kyc/kyc.service';
@@ -71,6 +72,7 @@ function kycFromEnv(): KycProvider | null {
     PayoutController,
     AccountController,
     WebhookController,
+    RailWebhookController,
     KycController,
   ],
   providers: [

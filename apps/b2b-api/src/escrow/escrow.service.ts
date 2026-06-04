@@ -21,7 +21,7 @@ import {
   type FeeResponsibility,
 } from '@clairtus/core';
 import { Ledger, type AccountType } from '@clairtus/ledger';
-import type { PaymentRail } from '@clairtus/payments';
+import type { PaymentRail, NormalizedEvent } from '@clairtus/payments';
 import type { ApiKeyMode } from '@clairtus/tenancy';
 import { SQL, RAIL, SIMULATED_RAIL, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
@@ -357,6 +357,74 @@ export class EscrowService {
     if (rows.length === 0) throw new NotFoundException('payout not found');
     const r = rows[0]! as any;
     return { id: r.id, escrowId: r.escrow_id, recipientPartyId: r.recipient_party_id, amount: num(r.amount), currency: r.currency, rail: r.rail, railRef: r.rail_ref, status: r.status, createdAt: r.created_at };
+  }
+
+  // ---- inbound rail events (webhooks) ------------------------------------
+
+  /**
+   * Drives the lifecycle from a normalized inbound rail event (M7). System-level (no API key): the
+   * escrow/payout is resolved from the event reference we set when initiating
+   * (`payin:{escrowId}` / the payout id). Idempotent — re-delivery is a no-op (state-guarded + the
+   * ledger ignores a repeated posting reference, invariant #3).
+   */
+  async handleRailEvent(event: NormalizedEvent): Promise<{ handled: boolean }> {
+    const ref = event.reference ?? event.railRef;
+
+    if (event.type === 'payin.succeeded' || event.type === 'payin.failed') {
+      if (!ref.startsWith('payin:')) return { handled: false };
+      const escrowId = ref.slice('payin:'.length);
+      const e = await this.loadEscrowAnyTenant(escrowId);
+      if (!e) return { handled: false };
+      const tenantId = e.tenant_id;
+
+      if (event.type === 'payin.failed') {
+        await this.sql.query(`update payins set status = 'failed', updated_at = now() where escrow_id = $1 and tenant_id = $2`, [escrowId, tenantId]);
+        await this.audit.record({ tenantId, action: 'escrow.payin_failed', resourceType: 'escrow', resourceId: escrowId, escrowId, actor: 'rail', metadata: { railRef: event.railRef } });
+        return { handled: true };
+      }
+
+      // payin.succeeded — confirm funding exactly once (idempotent if already FUNDED).
+      if (e.status !== 'AWAITING_FUNDING') {
+        await this.sql.query(`update payins set status = 'succeeded', updated_at = now() where escrow_id = $1 and tenant_id = $2`, [escrowId, tenantId]);
+        return { handled: true };
+      }
+      const breakdown = this.breakdown(e);
+      const external = await this.account(tenantId, 'external', e.currency, null);
+      await this.ledger.post(
+        buildFundPosting({
+          tenantId, reference: `fund:${escrowId}`, currency: e.currency, escrowId,
+          depositAmount: breakdown.depositAmount.amount,
+          accounts: { external, held: e.held_account_id },
+        }),
+      );
+      await this.setStatus(tenantId, escrowId, this.transition(e.status, 'FUNDING_CONFIRMED'));
+      await this.sql.query(`update payins set status = 'succeeded', updated_at = now() where escrow_id = $1 and tenant_id = $2`, [escrowId, tenantId]);
+      await this.webhooks.emit(tenantId, { type: 'escrow.funded', escrowId, data: { depositAmount: breakdown.depositAmount.amount } });
+      await this.audit.record({ tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: escrowId, escrowId, actor: 'rail', metadata: { depositAmount: breakdown.depositAmount.amount, via: 'webhook' } });
+      return { handled: true };
+    }
+
+    if (event.type === 'payout.succeeded' || event.type === 'payout.failed') {
+      const { rows } = await this.sql.query<{ id: string; tenant_id: string; escrow_id: string; status: string }>(
+        `select id, tenant_id, escrow_id, status from payouts where id = $1`,
+        [ref],
+      );
+      const p = rows[0];
+      if (!p) return { handled: false };
+      const newStatus = event.type === 'payout.succeeded' ? 'succeeded' : 'failed';
+      if (p.status === newStatus) return { handled: true }; // idempotent re-delivery
+      await this.sql.query(`update payouts set status = $1 where id = $2 and tenant_id = $3`, [newStatus, p.id, p.tenant_id]);
+      await this.webhooks.emit(p.tenant_id, { type: event.type === 'payout.succeeded' ? 'payout.succeeded' : 'payout.failed', escrowId: p.escrow_id, data: { payoutId: p.id, railRef: event.railRef } });
+      await this.audit.record({ tenantId: p.tenant_id, action: event.type === 'payout.succeeded' ? 'payout.succeeded' : 'payout.failed', resourceType: 'payout', resourceId: p.id, escrowId: p.escrow_id, actor: 'rail', metadata: { railRef: event.railRef } });
+      return { handled: true };
+    }
+
+    return { handled: false };
+  }
+
+  private async loadEscrowAnyTenant(id: string): Promise<(EscrowRow & { tenant_id: string }) | null> {
+    const { rows } = await this.sql.query<EscrowRow & { tenant_id: string }>(`select * from escrows where id = $1`, [id]);
+    return rows[0] ?? null;
   }
 
   // ---- balances & ledger -------------------------------------------------
