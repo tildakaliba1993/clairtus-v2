@@ -88,9 +88,13 @@ The consumer "app" is WhatsApp itself — `app.clairtus.com` is the **dashboard*
   - **Always-on machine** with `webhook-worker --loop` (`WORKER_INTERVAL_MS`, default 60000) — a second
     Fly process/machine sharing the image + `DATABASE_URL`.
   Runs under the SWC runtime (Nest DI), same as the API.
+- **Reconciliation:** schedule `corepack pnpm --filter @clairtus/b2b-api reconcile` (e.g. hourly). It
+  compares ledger custody vs the Korapay balance per currency and **exits non-zero on drift** — wrap it
+  in a cron/alert. `RECON_TOLERANCE_MINOR` sets the allowed drift.
 - **Onboard the first design partner:** see `docs/ONBOARDING.md` (sandbox `ck_test_…` first).
-- **Observability:** logs are structured JSON stamped with `X-Request-Id`; attach an OpenTelemetry
-  exporter to `@clairtus/observability` when ready.
+- **Observability:** logs are structured JSON stamped with `X-Request-Id`; set `OTEL_EXPORTER_OTLP_ENDPOINT`
+  to ship traces to a collector; scrape **`GET /v1/system/metrics`** (queue depth, DLQ, webhook backlog)
+  for dashboards/alerts; `SENTRY_DSN` for error tracking.
 
 ## 6. CI/CD — GitHub Actions
 
@@ -122,6 +126,8 @@ gracefully (CI still goes green), so merging is never blocked by a missing secre
 | `THROTTLE_LIMIT` / `THROTTLE_TTL` | — | Per-API-key rate limit (default 300 req / 60000 ms) |
 | `SENTRY_DSN` | — | Enables Sentry error tracking (5xx reported with correlation id); no-op when unset |
 | `WORKER_INTERVAL_MS` | — | `webhook-worker --loop` poll interval (default 60000) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Enables OpenTelemetry tracing to that collector; no-op when unset |
+| `RECON_TOLERANCE_MINOR` | — | Allowed ledger↔PSP drift (minor units) before `reconcile` flags it |
 | `FICA_DAILY_MAX_USD` / `FICA_MONTHLY_MAX_USD` | — | SA compliance caps (USD); defaults 1500 / 15000 |
 | `FX_ZAR_USD` / `FX_NGN_USD` / `FX_CDF_USD` | — | Local major units per 1 USD for compliance conversion |
 | `KYC_THRESHOLD_ZA_USD` / `KYC_THRESHOLD_CD_USD` | — | Per-market KYC step-up tier (USD); overrides the global fallback |

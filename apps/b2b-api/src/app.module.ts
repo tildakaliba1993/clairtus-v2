@@ -11,6 +11,7 @@ import { AccountController } from './escrow/account.controller';
 import { EscrowService } from './escrow/escrow.service';
 import { ComplianceService, COMPLIANCE_CONFIG, complianceConfigFromEnv } from './escrow/compliance';
 import { AuditService } from './audit/audit.service';
+import { ReconciliationService } from './recon/reconciliation.service';
 import { WebhookController } from './webhooks/webhook.controller';
 import { RailWebhookController } from './webhooks/rail.controller';
 import { WebhookService } from './webhooks/webhook.service';
@@ -86,6 +87,8 @@ function liveRailFromEnv(): PaymentRail | null {
     ComplianceService,
     // Immutable audit log of money operations + admin actions.
     AuditService,
+    // Ledger ↔ PSP balance reconciliation (M11).
+    ReconciliationService,
     EscrowService,
     WebhookService,
     KycService,
