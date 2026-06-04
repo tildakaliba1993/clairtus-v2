@@ -145,6 +145,13 @@ export class ClairtusClient {
     replay: (id: string) => this.request('POST', `/webhook-deliveries/${id}/replay`, {}),
   };
 
+  /** Tenant API-key management (requires a key with `keys:read` / `keys:write`). */
+  readonly apiKeys = {
+    list: () => this.request('GET', '/keys'),
+    create: (input: { mode: 'test' | 'live'; scopes?: string[] }) => this.request('POST', '/keys', input),
+    revoke: (id: string) => this.request('POST', `/keys/${id}/revoke`, {}),
+  };
+
   balances = () => this.request('GET', '/balances');
   ledger = <T = unknown>(params?: ListParams) => this.request<Page<T>>('GET', `/ledger${this.qs(params)}`);
 }

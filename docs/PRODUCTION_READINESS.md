@@ -58,8 +58,9 @@ _Last updated: 2026-06-04, immediately after first live deploy._
   product needs partner sign-up + tenant provisioning.
 - 🔴 **Dashboard has no real auth** — it only "remembers" a pasted API key in a cookie. Needs tenant **user
   accounts** (Supabase Auth: email/OAuth), sessions, and team membership.
-- 🔴 **No API-key management UI.** Keys are issued only via CLI; partners can't create/rotate/revoke keys, see
-  `last4`, or scope them from the dashboard. (Hashing + revoke exist in `@clairtus/tenancy`; needs UI + routes.)
+- 🟡 **API-key management API done (Phase 3 P3.1); UI pending.** `GET/POST /v1/keys` + `POST /v1/keys/:id/revoke`
+  (scoped `keys:read`/`keys:write`, tenant-isolated, audited; plaintext returned once) + SDK `apiKeys.*`. The
+  dashboard **UI** (and self-serve signup) that consume these are P3.2.
 - 🟡 **No roles/permissions** within a tenant (admin vs read-only).
 
 ## 3. Security hardening

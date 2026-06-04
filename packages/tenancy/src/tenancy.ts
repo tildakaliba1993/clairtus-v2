@@ -35,6 +35,17 @@ export interface AuthContext {
   scopes: string[];
 }
 
+/** Safe API-key metadata for listing — never includes the plaintext or hash. */
+export interface ApiKeySummary {
+  id: string;
+  mode: ApiKeyMode;
+  last4: string;
+  scopes: string[];
+  createdAt: string;
+  revokedAt: string | null;
+  active: boolean;
+}
+
 /** sha256 hex — what we persist instead of the raw key. */
 export function hashApiKey(plaintext: string): string {
   return createHash('sha256').update(plaintext).digest('hex');
@@ -115,7 +126,29 @@ export class Tenancy {
     return { tenantId: r.tenant_id, mode: r.mode, scopes: r.scopes ?? [] };
   }
 
-  async revokeApiKey(id: string): Promise<void> {
-    await this.sql.query(`update api_keys set revoked_at = now() where id = $1 and revoked_at is null`, [id]);
+  /** Revoke a key. When `tenantId` is given, only revokes a key belonging to that tenant (safe for the API). */
+  async revokeApiKey(id: string, tenantId?: string): Promise<boolean> {
+    const where = tenantId ? `where id = $1 and tenant_id = $2 and revoked_at is null` : `where id = $1 and revoked_at is null`;
+    const params = tenantId ? [id, tenantId] : [id];
+    const { rows } = await this.sql.query<{ id: string }>(
+      `update api_keys set revoked_at = now() ${where} returning id`,
+      params,
+    );
+    return rows.length > 0;
+  }
+
+  /** List a tenant's API keys (metadata only — never the plaintext or hash). */
+  async listApiKeys(tenantId: string): Promise<ApiKeySummary[]> {
+    const { rows } = await this.sql.query<{
+      id: string; mode: ApiKeyMode; last4: string; scopes: string[] | null; created_at: string; revoked_at: string | null;
+    }>(
+      `select id, mode, last4, scopes, created_at, revoked_at
+       from api_keys where tenant_id = $1 order by created_at desc`,
+      [tenantId],
+    );
+    return rows.map((r) => ({
+      id: r.id, mode: r.mode, last4: r.last4, scopes: r.scopes ?? [],
+      createdAt: r.created_at, revokedAt: r.revoked_at, active: r.revoked_at === null,
+    }));
   }
 }
