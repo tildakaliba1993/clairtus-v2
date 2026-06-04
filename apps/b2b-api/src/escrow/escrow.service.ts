@@ -23,8 +23,9 @@ import {
 import { Ledger, type AccountType } from '@clairtus/ledger';
 import type { PaymentRail } from '@clairtus/payments';
 import type { ApiKeyMode } from '@clairtus/tenancy';
-import { SQL, RAIL, SIMULATED_RAIL, KYC_RELEASE_THRESHOLD, type SqlExecutor } from '../db/sql';
+import { SQL, RAIL, SIMULATED_RAIL, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
+import { ComplianceService } from './compliance';
 import type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
 
 export type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
@@ -46,7 +47,7 @@ export class EscrowService {
     @Inject(SQL) private readonly sql: SqlExecutor,
     @Inject(RAIL) private readonly rail: PaymentRail | null,
     @Inject(SIMULATED_RAIL) private readonly simulatedRail: PaymentRail | null,
-    @Inject(KYC_RELEASE_THRESHOLD) private readonly kycReleaseThreshold: number,
+    private readonly compliance: ComplianceService,
     private readonly webhooks: WebhookService,
   ) {
     this.ledger = new Ledger(sql);
@@ -79,6 +80,15 @@ export class EscrowService {
     if (rows.length === 0) throw new BadRequestException(`${label} party not found`);
   }
 
+  /** The tenant's market (ISO-2 country) — drives per-market compliance rules + KYC tiers. */
+  private async tenantCountry(tenantId: string): Promise<string> {
+    const { rows } = await this.sql.query<{ country: string | null }>(
+      `select country from tenants where id = $1`,
+      [tenantId],
+    );
+    return rows[0]?.country ?? '';
+  }
+
   // ---- escrows -----------------------------------------------------------
 
   async createEscrow(tenantId: string, dto: CreateEscrowDto) {
@@ -91,6 +101,17 @@ export class EscrowService {
       if (!dto.secondaryPartyId) throw new BadRequestException('secondaryPartyId required when secondaryAmount > 0');
       await this.assertPartyExists(tenantId, dto.secondaryPartyId, 'secondary');
     }
+
+    // Compliance: per-market amount bounds + cumulative volume limits (422 on violation); records the decision.
+    const country = await this.tenantCountry(tenantId);
+    await this.compliance.assertCreateAllowed({
+      tenantId,
+      country,
+      currency: dto.currency,
+      baseAmountMinor: dto.baseAmount,
+      buyerPartyId: dto.buyerPartyId ?? null,
+      sellerPartyId: dto.sellerPartyId,
+    });
 
     // A fresh held account per escrow (linked by held_account_id).
     const held = await this.ledger.createAccount({ tenantId, type: 'escrow_held', currency: dto.currency });
@@ -135,15 +156,17 @@ export class EscrowService {
     const event: EscrowEventType = e.status === 'DISPUTED' ? 'RESOLVE_RELEASE' : 'RELEASE';
     const status = this.transition(e.status, event);
 
-    // KYC gate: higher-ticket releases require a VERIFIED seller (compliance step-up).
-    if (this.kycReleaseThreshold > 0 && num(e.base_amount) > this.kycReleaseThreshold) {
+    // KYC gate (per-market tier): higher-ticket releases require a VERIFIED seller (compliance step-up).
+    const country = await this.tenantCountry(tenantId);
+    const kycThresholdMinor = this.compliance.releaseKycThresholdMinor(country, e.currency);
+    if (kycThresholdMinor > 0 && num(e.base_amount) > kycThresholdMinor) {
       const k = await this.sql.query<{ kyc_status: string }>(
         `select kyc_status from parties where id = $1 and tenant_id = $2`,
         [e.seller_party_id, tenantId],
       );
       if (k.rows[0]?.kyc_status !== 'VERIFIED') {
         throw new ForbiddenException(
-          `seller KYC verification required to release above ${this.kycReleaseThreshold} (minor units)`,
+          `seller KYC verification required to release above ${kycThresholdMinor} (minor units) for market ${country}`,
         );
       }
     }

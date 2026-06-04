@@ -13,6 +13,7 @@
     "demo": "node --import tsx scripts/demo-escrow.ts"
   },
   "dependencies": {
+    "@clairtus/compliance": "workspace:*",
     "@clairtus/core": "workspace:*",
     "@clairtus/kyc": "workspace:*",
     "@clairtus/ledger": "workspace:*",

@@ -100,6 +100,9 @@ const check = await clairtus.kyc.createCheck({ partyId: seller.id, level: 'biome
   across manual retries (`{ idempotencyKey }`). A missing key on these routes returns **400**.
 - **Validation:** malformed/unknown/over-range fields are rejected with **422** before anything runs.
 - **Rate limiting:** requests are throttled per API key; over the limit returns **429** (back off + retry).
+- **Compliance limits:** escrow `create` is checked against your market's per-transaction and rolling
+  daily/monthly limits; an out-of-bounds amount returns **422**. Higher-ticket **release** requires a
+  KYC-**VERIFIED** seller above the market's tier (else **403**).
 
 ## Errors
 
