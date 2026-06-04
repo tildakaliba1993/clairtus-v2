@@ -1,5 +1,6 @@
-# Fly.io config for the B2B Escrow API. Deploy from repo root:
-#   fly deploy --config apps/b2b-api/fly.toml
+# Fly.io config for the B2B Escrow API. Lives at the repo ROOT so the build context is the
+# whole monorepo (the API imports workspace packages/*). Deploy from the repo root:
+#   fly deploy --ha=false
 app = "clairtus-api"
 primary_region = "jnb"  # Johannesburg — closest to SA design partners
 
@@ -15,16 +16,22 @@ primary_region = "jnb"  # Johannesburg — closest to SA design partners
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = "stop"
+  # Always-on single instance — do NOT auto-stop (an API + webhook worker must stay live).
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 1  # keep 1 warm so the webhook context + pool stay hot
+  min_machines_running = 1
 
 [[http_service.checks]]
   method = "GET"
   path = "/v1/health"
   interval = "15s"
-  timeout = "2s"
-  grace_period = "10s"
+  timeout = "5s"
+  grace_period = "30s"  # tsx + NestJS cold start needs headroom before checks count
+
+# 1 GB headroom for Node + the Postgres pool + Swagger (avoids any OOM under load).
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
 
 # Run DB migrations once per release, before the new version takes traffic.
 [deploy]
