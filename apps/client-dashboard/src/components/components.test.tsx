@@ -76,9 +76,9 @@ describe('KeyManager', () => {
 });
 
 describe('SignupForm', () => {
-  it('shows a "not enabled" notice + connect link when Supabase is not configured', () => {
-    render(<SignupForm />); // NEXT_PUBLIC_SUPABASE_* unset in tests → disabled
-    expect(screen.getByText(/isn't enabled yet/i)).toBeTruthy();
+  it('shows a "not enabled" notice + connect link when Supabase config is unavailable', async () => {
+    render(<SignupForm />); // /api/auth-config fetch fails in jsdom → not configured
+    expect(await screen.findByText(/isn't enabled yet/i)).toBeTruthy();
     expect(screen.getByRole('link', { name: /connect it here/i }).getAttribute('href')).toBe('/connect');
   });
 });
