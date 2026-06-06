@@ -128,6 +128,11 @@ gracefully (CI still goes green), so merging is never blocked by a missing secre
 | `WORKER_INTERVAL_MS` | — | `webhook-worker --loop` poll interval (default 60000) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | Enables OpenTelemetry tracing to that collector; no-op when unset |
 | `RECON_TOLERANCE_MINOR` | — | Allowed ledger↔PSP drift (minor units) before `reconcile` flags it |
+| `SUPABASE_JWT_SECRET` | for self-serve | Verifies Supabase session JWTs on `/v1/auth/*`; unset = self-serve off |
+
+**Dashboard self-serve env** (Vercel, `apps/client-dashboard`): set `NEXT_PUBLIC_SUPABASE_URL` +
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` to enable the `/signup` page. Use the **same** Supabase project whose JWT
+secret is set as `SUPABASE_JWT_SECRET` on the API, so the API can verify the dashboard's session tokens.
 | `FICA_DAILY_MAX_USD` / `FICA_MONTHLY_MAX_USD` | — | SA compliance caps (USD); defaults 1500 / 15000 |
 | `FX_ZAR_USD` / `FX_NGN_USD` / `FX_CDF_USD` | — | Local major units per 1 USD for compliance conversion |
 | `KYC_THRESHOLD_ZA_USD` / `KYC_THRESHOLD_CD_USD` | — | Per-market KYC step-up tier (USD); overrides the global fallback |

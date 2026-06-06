@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import Link from 'next/link';
 import { ConnectForm } from '../../components/ConnectForm';
 
 export default function ConnectPage(): ReactElement {
@@ -12,6 +13,9 @@ export default function ConnectPage(): ReactElement {
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <ConnectForm />
       </div>
+      <p className="text-muted mt-4 text-sm">
+        New here? <Link href="/signup" className="text-primary hover:underline">Create an account</Link>.
+      </p>
     </div>
   );
 }

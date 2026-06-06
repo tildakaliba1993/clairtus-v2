@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ModeBadge } from './ModeBadge';
 import { BalanceCards } from './BalanceCards';
 import { EscrowTable } from './EscrowTable';
 import { WebhookDeliveryTable } from './WebhookDeliveryTable';
 import { KeyManager } from './KeyManager';
+import { SignupForm } from './SignupForm';
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 describe('ModeBadge', () => {
   it('labels sandbox vs live distinctly', () => {
@@ -69,5 +72,13 @@ describe('KeyManager', () => {
     // Active key has a Revoke button; the revoked one does not.
     expect(screen.getAllByText('Revoke')).toHaveLength(1);
     expect(screen.getByText('revoked')).toBeTruthy();
+  });
+});
+
+describe('SignupForm', () => {
+  it('shows a "not enabled" notice + connect link when Supabase is not configured', () => {
+    render(<SignupForm />); // NEXT_PUBLIC_SUPABASE_* unset in tests → disabled
+    expect(screen.getByText(/isn't enabled yet/i)).toBeTruthy();
+    expect(screen.getByRole('link', { name: /connect it here/i }).getAttribute('href')).toBe('/connect');
   });
 });
