@@ -17,6 +17,9 @@ import { RailWebhookController } from './webhooks/rail.controller';
 import { WebhookService } from './webhooks/webhook.service';
 import { KycController } from './kyc/kyc.controller';
 import { KeyController } from './keys/key.controller';
+import { AuthController } from './auth/auth.controller';
+import { SignupService } from './auth/signup.service';
+import { AUTH_VERIFIER, authVerifierFromEnv } from './auth/session';
 import { KycService } from './kyc/kyc.service';
 import { SimulatedRail, KorapayRail, type PaymentRail } from '@clairtus/payments';
 import { JobQueue } from '@clairtus/queue';
@@ -65,6 +68,7 @@ function liveRailFromEnv(): PaymentRail | null {
     RailWebhookController,
     KycController,
     KeyController,
+    AuthController,
   ],
   providers: [
     // Database executor — Postgres (DATABASE_URL) in prod, pglite override in tests.
@@ -91,6 +95,9 @@ function liveRailFromEnv(): PaymentRail | null {
     AuditService,
     // Ledger ↔ PSP balance reconciliation (M11).
     ReconciliationService,
+    // Self-serve auth: session-token verifier (Supabase JWT in prod) + tenant provisioning.
+    { provide: AUTH_VERIFIER, useFactory: () => authVerifierFromEnv() },
+    SignupService,
     EscrowService,
     WebhookService,
     KycService,

@@ -142,6 +142,19 @@ create table if not exists compliance_decisions (
 create index if not exists compliance_decisions_tenant_idx on compliance_decisions(tenant_id, created_at);
 `;
 
+/** Self-serve: maps an external auth user (e.g. a Supabase user id) to the tenant they provisioned. */
+export const TENANT_USERS_SCHEMA = `
+create table if not exists tenant_users (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  auth_user_id text not null unique,
+  email text,
+  role text not null default 'admin',
+  created_at timestamptz not null default now()
+);
+create index if not exists tenant_users_tenant_idx on tenant_users(tenant_id);
+`;
+
 /** Immutable, append-only audit log of money operations + admin actions (architecture §14). */
 export const AUDIT_SCHEMA = `
 create table if not exists audit_log (
@@ -168,7 +181,7 @@ export const RLS_TABLES = ['parties', 'escrows', 'payins', 'payouts', 'events', 
  * production runs the equivalent versioned migrations under infra/.
  */
 export async function applyAllSchema(sql: SqlExecutor): Promise<void> {
-  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, JOB_QUEUE_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA, COMPLIANCE_SCHEMA, AUDIT_SCHEMA];
+  const blocks = [TENANCY_SCHEMA, LEDGER_SCHEMA, IDEMPOTENCY_SCHEMA, JOB_QUEUE_SCHEMA, DOMAIN_SCHEMA, WEBHOOK_SCHEMA, KYC_SCHEMA, COMPLIANCE_SCHEMA, AUDIT_SCHEMA, TENANT_USERS_SCHEMA];
   for (const block of blocks) {
     for (const stmt of block.split(';').map((s) => s.trim()).filter(Boolean)) {
       await sql.query(stmt);

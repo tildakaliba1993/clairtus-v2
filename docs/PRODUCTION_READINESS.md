@@ -54,10 +54,14 @@ _Last updated: 2026-06-04, immediately after first live deploy._
 
 ## 2. Self-serve onboarding & authentication
 
-- 🔴 **No self-serve signup.** Tenants are created by an operator CLI (`pnpm … onboard`). A self-serve
-  product needs partner sign-up + tenant provisioning.
-- 🔴 **Dashboard has no real auth** — it only "remembers" a pasted API key in a cookie. Needs tenant **user
-  accounts** (Supabase Auth: email/OAuth), sessions, and team membership.
+- ✅ **Self-serve signup (done, Phase 3).** `POST /v1/auth/signup` verifies a **session JWT** (Supabase,
+  via a pluggable `AuthVerifier`) and **provisions a tenant + test/live keys** on first login (idempotent;
+  `tenant_users` maps auth-user → tenant); `GET /v1/auth/me` bootstraps the dashboard. The dashboard has a
+  `/signup` page (Supabase email/password) that auto-connects on signup. *Operator:* set `SUPABASE_JWT_SECRET`
+  (API) + `NEXT_PUBLIC_SUPABASE_URL`/`ANON_KEY` (dashboard). *Follow-up:* OAuth, returning-user auto-reconnect
+  (API accepting the session JWT for reads), team membership.
+- 🟡 **Dashboard auth = signup-or-pasted-key.** New users self-serve via Supabase; existing users connect a
+  key. Full session-based dashboard auth (no key paste) + roles is the remaining piece.
 - 🟡 **API-key management API done (Phase 3 P3.1); UI pending.** `GET/POST /v1/keys` + `POST /v1/keys/:id/revoke`
   (scoped `keys:read`/`keys:write`, tenant-isolated, audited; plaintext returned once) + SDK `apiKeys.*`. The
   dashboard **UI** (and self-serve signup) that consume these are P3.2.
