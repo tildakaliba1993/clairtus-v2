@@ -81,8 +81,15 @@ pnpm workspaces; keep "Include source files outside the Root Directory" enabled)
 - `CLAIRTUS_API_URL` already points at the API.
 Verify it's live: `curl https://<dashboard>/api/auth-config` → `{ "configured": true }`. If it says
 `false`, the env isn't reaching the deployment (set it on **Production** scope + redeploy). Use the
-**same** Supabase project as the API's `SUPABASE_URL`. In Supabase → Authentication, enable **Email**
-sign-ups (and turn off "Confirm email" for a frictionless demo).
+**same** Supabase project as the API's `SUPABASE_URL`. In **Supabase → Authentication**:
+- **Sign In / Providers → Email** enabled. For **instant** signup, turn **off** "Confirm email"
+  (signup returns a session immediately → auto-provision + connect).
+- If you keep "Confirm email" **on**: **URL Configuration → Site URL** = the dashboard URL, and add it
+  (plus `…/signup`) to **Redirect URLs**, so the confirmation link returns to the dashboard — where the
+  session is detected and the tenant is auto-provisioned. (The dashboard bridges on *any* session:
+  instant signup, the confirmation redirect, or login.)
+- **Rate Limits**: the default signup limit is low (the "you can only request this after N seconds"
+  message) — raise it for demos/testing.
 
 ## 4. B2C WhatsApp — Supabase Edge (unchanged)
 Already live in DRC. Deploy as before: `supabase functions deploy whatsapp-webhook` (and `smile-id-callback`).

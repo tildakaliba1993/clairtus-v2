@@ -17,7 +17,15 @@ export async function fetchAuthConfig(): Promise<AuthConfig> {
   }
 }
 
-/** A browser Supabase client built from the runtime config. */
-export function browserSupabase(url: string, anonKey: string): SupabaseClient {
-  return createClient(url, anonKey);
+// One client per browser context — multiple GoTrueClient instances share storage and misbehave.
+let client: SupabaseClient | null = null;
+
+/** The singleton browser Supabase client (created once from the runtime config). */
+export function getSupabase(url: string, anonKey: string): SupabaseClient {
+  if (!client) {
+    client = createClient(url, anonKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+    });
+  }
+  return client;
 }
