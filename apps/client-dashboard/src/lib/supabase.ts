@@ -1,14 +1,23 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-/** True when Supabase Auth env is configured (NEXT_PUBLIC_* are inlined into the client bundle). */
-export function supabaseConfigured(): boolean {
-  return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+export interface AuthConfig {
+  configured: boolean;
+  url?: string;
+  anonKey?: string;
 }
 
-/** A browser Supabase client. Only call when supabaseConfigured() is true. */
-export function browserSupabase(): SupabaseClient {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL as string,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string,
-  );
+/** Fetch the runtime Supabase config from the server (no build-time inlining). Never throws. */
+export async function fetchAuthConfig(): Promise<AuthConfig> {
+  try {
+    const res = await fetch('/api/auth-config');
+    if (!res.ok) return { configured: false };
+    return (await res.json()) as AuthConfig;
+  } catch {
+    return { configured: false };
+  }
+}
+
+/** A browser Supabase client built from the runtime config. */
+export function browserSupabase(url: string, anonKey: string): SupabaseClient {
+  return createClient(url, anonKey);
 }

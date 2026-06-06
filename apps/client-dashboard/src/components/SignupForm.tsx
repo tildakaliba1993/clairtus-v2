@@ -1,24 +1,33 @@
 'use client';
 
-import { useState, type FormEvent, type ReactElement } from 'react';
+import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { supabaseConfigured, browserSupabase } from '../lib/supabase';
+import { fetchAuthConfig, browserSupabase, type AuthConfig } from '../lib/supabase';
 
 /**
- * Self-serve signup/login via Supabase Auth. On a successful session it bridges to the API
- * (`/api/signup`), which provisions the tenant on first login and connects the dashboard. Renders a
- * "not configured" notice until the Supabase env is set.
+ * Self-serve signup/login via Supabase Auth. Reads its config at runtime from `/api/auth-config`
+ * (server env — no rebuild needed). On a successful session it bridges to the API (`/api/signup`),
+ * which provisions the tenant on first login and connects the dashboard.
  */
 export function SignupForm(): ReactElement {
   const router = useRouter();
+  const [config, setConfig] = useState<AuthConfig | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  if (!supabaseConfigured()) {
+  useEffect(() => {
+    fetchAuthConfig().then(setConfig);
+  }, []);
+
+  if (config === null) {
+    return <div className="rounded-md border border-slate-200 bg-white p-5 text-sm text-muted">Loading…</div>;
+  }
+
+  if (!config.configured) {
     return (
       <div className="rounded-md border border-slate-200 bg-white p-5">
         <p className="text-sm text-foreground">Self-serve sign-up isn&apos;t enabled yet.</p>
@@ -44,11 +53,12 @@ export function SignupForm(): ReactElement {
 
   async function submit(mode: 'signup' | 'login', e: FormEvent): Promise<void> {
     e.preventDefault();
+    if (!config?.configured) return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const supabase = browserSupabase();
+      const supabase = browserSupabase(config.url!, config.anonKey!);
       const { data, error: authErr } =
         mode === 'signup'
           ? await supabase.auth.signUp({ email, password })

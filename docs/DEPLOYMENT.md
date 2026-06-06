@@ -75,6 +75,15 @@ pnpm workspaces; keep "Include source files outside the Root Directory" enabled)
 - Add each custom domain in the Vercel project, then create the DNS records Vercel shows
   (CNAME → `cname.vercel-dns.com`, or A/ALIAS for the apex `clairtus.com`).
 
+**Enable self-serve signup on the dashboard.** Set these on the `clairtus-dashboard` Vercel project
+(plain env vars — read at **runtime**, no `NEXT_PUBLIC_` prefix needed), then **redeploy**:
+- `SUPABASE_URL` = `https://<ref>.supabase.co`  ·  `SUPABASE_ANON_KEY` = the anon/public key
+- `CLAIRTUS_API_URL` already points at the API.
+Verify it's live: `curl https://<dashboard>/api/auth-config` → `{ "configured": true }`. If it says
+`false`, the env isn't reaching the deployment (set it on **Production** scope + redeploy). Use the
+**same** Supabase project as the API's `SUPABASE_URL`. In Supabase → Authentication, enable **Email**
+sign-ups (and turn off "Confirm email" for a frictionless demo).
+
 ## 4. B2C WhatsApp — Supabase Edge (unchanged)
 Already live in DRC. Deploy as before: `supabase functions deploy whatsapp-webhook` (and `smile-id-callback`).
 The consumer "app" is WhatsApp itself — `app.clairtus.com` is the **dashboard**; a B2C deep-link
