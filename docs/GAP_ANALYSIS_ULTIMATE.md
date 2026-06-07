@@ -73,8 +73,9 @@ correct, it's system-level.)
 - **B10. Webhook robustness** — outbound has retry+DLQ (good); inbound concurrent duplicate `charge.success`
   is saved by ledger-reference idempotency but can double-emit the outbound `escrow.funded`. Document
   receiver dedupe; enforce HTTPS endpoints.
-- **B11. `/system/metrics`** exposes global counts to any authenticated tenant (minor info leak) — scope to
-  an ops key or internal port.
+- **B11. ✅ `/system/metrics` scoped to operators** — the endpoint now requires the operator-only
+  `ops:read` scope (not in `DEFAULT_WRITE_SCOPES`), so a standard tenant key gets 403; mint an ops key
+  with `ops:read` for monitoring/alerting. No more system-wide counts leaking to any authenticated tenant.
 
 ## C. 🟢 Polish / post-pilot
 OpenAPI **response** schemas still thin (request bodies done) · add **ESLint** (`turbo run lint` is a

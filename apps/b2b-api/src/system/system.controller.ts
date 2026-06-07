@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { JobQueue } from '@clairtus/queue';
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
+import { Scopes, SCOPES } from '../common/scopes';
 import { SQL, JOB_QUEUE, type SqlExecutor } from '../db/sql';
 import { PAYOUT_DISPATCH_QUEUE } from '../escrow/payout-dispatch';
 
@@ -10,8 +11,9 @@ import { PAYOUT_DISPATCH_QUEUE } from '../escrow/payout-dispatch';
  * Cross-cutting/system endpoints:
  * - GET /v1/whoami → echoes the authenticated tenant context (proves the API-key guard).
  * - POST /v1/echo  → idempotency demo (a replay under an Idempotency-Key returns the same id).
- * - GET /v1/system/metrics → operational counters for monitoring/alerting (queue depth, DLQ,
- *   webhook backlog). Authenticated (any valid key); counts are system-wide, not tenant data.
+ * - GET /v1/system/metrics → system-wide operational counters (queue depth, DLQ, webhook backlog).
+ *   These are NOT tenant data, so the route requires the operator-only `ops:read` scope (B11) — a
+ *   standard tenant key gets 403; mint an ops key with `ops:read` for monitoring/alerting.
  */
 @Controller()
 export class SystemController {
@@ -32,6 +34,7 @@ export class SystemController {
   }
 
   @Get('system/metrics')
+  @Scopes(SCOPES.opsRead)
   async metrics(): Promise<{
     queue: { payoutDispatch: Record<string, number> };
     webhooks: { due: number; stuck: number };

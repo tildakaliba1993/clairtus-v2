@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
 import { AppModule } from '../src/app.module';
-import { DEFAULT_WRITE_SCOPES } from '../src/common/scopes';
+import { DEFAULT_WRITE_SCOPES, SCOPES } from '../src/common/scopes';
 import { SQL } from '../src/db/sql';
 import { applyAllSchema } from '../src/db/schema';
 import { ReconciliationService } from '../src/recon/reconciliation.service';
@@ -33,6 +33,7 @@ function executor(db: PGlite): SqlExecutor {
 
 let app: INestApplication;
 let auth: string;
+let opsAuth: string; // key with the operator-only ops:read scope
 let recon: ReconciliationService;
 
 beforeAll(async () => {
@@ -42,6 +43,7 @@ beforeAll(async () => {
   const tenancy = new Tenancy(sql);
   const t = await tenancy.createTenant({ name: 'Acme', country: 'ZA' });
   auth = `Bearer ${(await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: DEFAULT_WRITE_SCOPES })).plaintext}`;
+  opsAuth = `Bearer ${(await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: [SCOPES.opsRead] })).plaintext}`;
 
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(SQL).useValue(sql)
@@ -87,8 +89,8 @@ describe('reconciliation: ledger ↔ PSP balance (PR-11.1)', () => {
 });
 
 describe('operational metrics (PR-11.3)', () => {
-  it('GET /v1/system/metrics returns queue + webhook counters', async () => {
-    const res = await http().get('/v1/system/metrics').set('Authorization', auth);
+  it('GET /v1/system/metrics returns queue + webhook counters for an ops:read key', async () => {
+    const res = await http().get('/v1/system/metrics').set('Authorization', opsAuth);
     expect(res.status).toBe(200);
     expect(res.body.queue.payoutDispatch).toMatchObject({ pending: 0, processing: 0, done: 0, dead: 0 });
     expect(res.body.webhooks).toHaveProperty('due');
@@ -97,5 +99,11 @@ describe('operational metrics (PR-11.3)', () => {
 
   it('requires authentication', async () => {
     expect((await http().get('/v1/system/metrics')).status).toBe(401);
+  });
+
+  it('forbids a standard tenant key without ops:read (B11 — no system-wide info leak)', async () => {
+    const res = await http().get('/v1/system/metrics').set('Authorization', auth);
+    expect(res.status).toBe(403);
+    expect(res.body.error.message).toMatch(/ops:read/);
   });
 });
