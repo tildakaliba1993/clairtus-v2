@@ -72,10 +72,12 @@ beforeAll(async () => {
 afterAll(async () => { await app.close(); });
 
 const http = () => request(app.getHttpServer());
-const heldBalance = async (): Promise<number> => {
+// Sum across all accounts of a type — every escrow gets its own escrow_held account.
+const balanceOf = async (type: string): Promise<number> => {
   const b = (await http().get('/v1/balances').set('Authorization', auth)).body as { data: { type: string; balance: number }[] };
-  return b.data.find((a) => a.type === 'escrow_held')?.balance ?? 0;
+  return b.data.filter((a) => a.type === type).reduce((s, a) => s + a.balance, 0);
 };
+const heldBalance = async (): Promise<number> => balanceOf('escrow_held');
 
 async function awaitingEscrow(): Promise<string> {
   const seller = (await http().post('/v1/parties').set('Authorization', auth).send({ role: 'seller' })).body.id;
@@ -108,6 +110,24 @@ describe('inbound rail webhook (M7)', () => {
     const replay = await http().post('/v1/webhooks/korapay').set('x-korapay-signature', sign(data)).send(body);
     expect(replay.status).toBe(200);
     expect(await heldBalance()).toBe(heldAfter); // unchanged
+  });
+
+  it('posts the actual settled net + PSP fee on charge.success, not the expected deposit (A3)', async () => {
+    const id = await awaitingEscrow(); // expected deposit = 100000
+    const heldBefore = await heldBalance();
+
+    // Korapay settles NET of its fee: buyer paid 1000.00, Korapay deducted 15.00 → 985.00 actually lands.
+    const data = { reference: `payin:${id}`, amount: '1000.00', fee: '15.00', currency: 'ZAR', status: 'success' };
+    const res = await http().post('/v1/webhooks/korapay').set('x-korapay-signature', sign(data)).send({ event: 'charge.success', data });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, handled: true });
+
+    // Held reflects the ACTUAL settled net (98500), not the expected deposit (100000) — custody is no
+    // longer overstated, and the PSP fee is modeled in its own account so the ledger ⇄ PSP reconciles.
+    expect(await heldBalance()).toBe(heldBefore + 98500);
+    expect(await balanceOf('psp_fees')).toBe(1500);
+
+    expect((await http().get(`/v1/escrows/${id}`).set('Authorization', auth)).body.status).toBe('FUNDED');
   });
 
   it('rejects a forged signature with 401', async () => {

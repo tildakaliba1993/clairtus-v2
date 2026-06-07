@@ -48,6 +48,7 @@ beforeEach(async () => {
     primary: await mk('recipient_payable' as never),
     secondary: await mk('recipient_payable' as never),
     revenue: await mk('clairtus_revenue' as never),
+    pspFees: await mk('psp_fees' as never),
   };
 });
 
@@ -89,6 +90,23 @@ describe('escrow lifecycle posts correctly and reconciles', () => {
     expect(await ledger.getBalance(acc.secondary!)).toBe(0);
     expect(await ledger.getBalance(acc.revenue!)).toBe(1500); // Clairtus keeps its fee
     expect(await systemSum()).toBe(0);
+  });
+
+  it('fund with a PSP fee credits held the net, psp_fees the fee, and debits external the gross (A3)', async () => {
+    const base = { tenantId: TENANT, currency: 'ZAR', escrowId: 'esc-fee' };
+    const accounts = { external: acc.external!, held: acc.held!, pspFees: acc.pspFees! };
+    // Buyer paid 100000 gross; the PSP took 1500, settling 98500 into custody.
+    await ledger.post(buildFundPosting({ ...base, reference: 'fund', depositAmount: 98500, fee: 1500, accounts }));
+    expect(await ledger.getBalance(acc.held!)).toBe(98500); // actual net held — not overstated
+    expect(await ledger.getBalance(acc.pspFees!)).toBe(1500); // fee modeled
+    expect(await ledger.getBalance(acc.external!)).toBe(-100000); // gross left the outside world
+    expect(await systemSum()).toBe(0);
+  });
+
+  it('fund with fee > 0 requires a pspFees account', () => {
+    const base = { tenantId: TENANT, currency: 'ZAR', escrowId: 'esc-fee2' };
+    expect(() => buildFundPosting({ ...base, reference: 'fund', depositAmount: 98500, fee: 1500, accounts: { external: acc.external!, held: acc.held! } }))
+      .toThrow(EscrowLedgerError);
   });
 
   it('refund returns the full deposit and conserves to zero', async () => {

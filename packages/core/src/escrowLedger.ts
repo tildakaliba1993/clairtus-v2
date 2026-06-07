@@ -5,7 +5,7 @@
  * the fee engine and the ledger).
  *
  * Money flow across the ledger:
- *   fund:    external (debit deposit)        → escrow_held (credit deposit)
+ *   fund:    external (debit gross)          → escrow_held (credit net) [+ psp_fees (credit fee)]
  *   release: escrow_held (debit deposit)     → recipient(s) (credit nets) + revenue (credit fee)
  *   payout:  recipient_payable (debit net)   → external (credit net)
  *   refund:  escrow_held (debit deposit)     → external (credit deposit)
@@ -23,6 +23,7 @@ export interface EscrowAccounts {
   primaryRecipient: string;
   secondaryRecipient?: string;
   revenue: string;
+  pspFees?: string;
 }
 
 interface Base {
@@ -38,21 +39,27 @@ function assertPositiveInt(n: number, label: string): void {
   }
 }
 
-/** Buyer funds the escrow: money in, held. */
+/**
+ * Buyer funds the escrow: money in, held. `depositAmount` is the amount actually settled into custody
+ * (credited to `held`). When the rail deducts a PSP fee before settling, pass `fee` (+ a `pspFees`
+ * account): the buyer's gross (`depositAmount + fee`) debits `external` and the fee credits `psp_fees`,
+ * so the ledger reflects the true gross/net/fee split and never overstates custody.
+ */
 export function buildFundPosting(
-  p: Base & { depositAmount: number; accounts: Pick<EscrowAccounts, 'external' | 'held'> },
+  p: Base & { depositAmount: number; fee?: number; accounts: Pick<EscrowAccounts, 'external' | 'held' | 'pspFees'> },
 ): PostingGroupInput {
   assertPositiveInt(p.depositAmount, 'depositAmount');
-  return {
-    tenantId: p.tenantId,
-    reference: p.reference,
-    currency: p.currency,
-    escrowId: p.escrowId,
-    entries: [
-      { accountId: p.accounts.external, direction: 'debit', amount: p.depositAmount },
-      { accountId: p.accounts.held, direction: 'credit', amount: p.depositAmount },
-    ],
-  };
+  const fee = p.fee ?? 0;
+  const entries: EntryInput[] = [
+    { accountId: p.accounts.external, direction: 'debit', amount: p.depositAmount + fee },
+    { accountId: p.accounts.held, direction: 'credit', amount: p.depositAmount },
+  ];
+  if (fee > 0) {
+    assertPositiveInt(fee, 'fee');
+    if (!p.accounts.pspFees) throw new EscrowLedgerError('pspFees account is required when fee > 0');
+    entries.push({ accountId: p.accounts.pspFees, direction: 'credit', amount: fee });
+  }
+  return { tenantId: p.tenantId, reference: p.reference, currency: p.currency, escrowId: p.escrowId, entries };
 }
 
 /** Full release: held → recipient net(s) + platform revenue, using the fee breakdown. */
