@@ -46,9 +46,10 @@ correct, it's system-level.)
 
 ## B. 🟡 Production-hardening
 
-- **B1. Migrations are full-schema "create if not exists"** (`db/migrate.ts`) — no ALTER/backfill/rollback,
-  no `schema_migrations`. Fine for additive v1; add a real migration tool before the schema evolves.
-  (Also dedupe the double `JOB_QUEUE_SCHEMA` apply.)
+- **B1. ✅ Versioned migration runner** (`db/migrations.ts`) — forward-only migrations tracked in
+  `schema_migrations`, each applied atomically with its marker; `0001_baseline` is the v1 schema (all
+  `create … if not exists`, safe no-op on the live DB). `migrate()` delegates to the runner; the double
+  `JOB_QUEUE_SCHEMA` apply is deduped. Future schema changes: append `0002_…` with ALTER/backfill.
 - **B2. OpenTelemetry exports little** — `common/tracing.ts` starts `NodeSDK` with **no instrumentations**.
   Add `@opentelemetry/auto-instrumentations-node` (or manual spans) so traces aren't near-empty.
 - **B3. Reconciliation ignores PSP pending balance + fees** — `recon` compares ledger vs **available**

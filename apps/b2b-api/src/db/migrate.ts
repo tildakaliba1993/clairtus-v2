@@ -1,15 +1,13 @@
 import type { SqlExecutor } from '@clairtus/tenancy';
-import { JOB_QUEUE_SCHEMA } from '@clairtus/queue';
-import { applyAllSchema } from './schema';
+import { runMigrations } from './migrations';
 
 /**
- * Apply the full schema to a database. Everything is `create table if not exists` + idempotent
- * RLS policy (re)creation, so this is safe to run repeatedly (it doubles as the v1 migration).
+ * Apply outstanding database migrations (run before the API serves money endpoints — Fly
+ * release_command / CI deploy step). Forward-only and idempotent: each migration runs at most once,
+ * tracked in `schema_migrations`. The v1 baseline is all `create … if not exists`, so this is safe on
+ * both a fresh DB and the already-provisioned production DB.
  * IMPORTANT: run this as the same DB role the API uses (the table OWNER) — see tenantRlsSql.
  */
 export async function migrate(sql: SqlExecutor): Promise<void> {
-  await applyAllSchema(sql); // tenancy + ledger + idempotency + domain + webhooks + kyc + RLS
-  for (const stmt of JOB_QUEUE_SCHEMA.split(';').map((s) => s.trim()).filter(Boolean)) {
-    await sql.query(stmt); // durable job queue (T5.2)
-  }
+  await runMigrations(sql);
 }
