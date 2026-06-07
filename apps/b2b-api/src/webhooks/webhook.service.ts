@@ -1,7 +1,24 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import { SQL, FETCH, type SqlExecutor } from '../db/sql';
 import { signWebhook, type WebhookEventType } from './signing';
+
+/**
+ * Validate a delivery URL: must be a well-formed absolute URL over **https** (B10). Webhook payloads
+ * carry signed event data; plaintext http risks interception/tampering, so http (and other schemes)
+ * are rejected. Throws BadRequestException → 400, whether called via the API or onboarding.
+ */
+function assertHttpsUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new BadRequestException('webhook url must be a valid absolute URL');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new BadRequestException('webhook url must use https');
+  }
+}
 
 const MAX_ATTEMPTS = 5;
 /** Exponential backoff with a 1h cap: 2^attempts seconds (2s, 4s, 8s, …). */
@@ -21,8 +38,9 @@ export class WebhookService {
     @Inject(FETCH) private readonly fetchImpl: typeof fetch,
   ) {}
 
-  /** Register a delivery endpoint; returns the signing secret ONCE. */
+  /** Register a delivery endpoint (https only); returns the signing secret ONCE. */
   async registerEndpoint(tenantId: string, url: string): Promise<{ id: string; url: string; signingSecret: string }> {
+    assertHttpsUrl(url);
     const signingSecret = `whsec_${randomBytes(24).toString('base64url')}`;
     const { rows } = await this.sql.query<{ id: string }>(
       `insert into webhook_endpoints (tenant_id, url, signing_secret) values ($1,$2,$3) returning id`,

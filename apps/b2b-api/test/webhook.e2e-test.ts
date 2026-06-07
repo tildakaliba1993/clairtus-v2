@@ -83,6 +83,17 @@ describe('outbound webhooks (T3.4)', () => {
     signingSecret = res.body.signingSecret;
   });
 
+  it('rejects a non-https endpoint url (B10 — no plaintext webhook delivery)', async () => {
+    const res = await http().post('/v1/webhook-endpoints').set('Authorization', auth).send({ url: 'http://hook.example/cb' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toMatch(/https/);
+  });
+
+  it('rejects a malformed endpoint url', async () => {
+    const res = await http().post('/v1/webhook-endpoints').set('Authorization', auth).send({ url: 'not-a-url' });
+    expect(res.status).toBe(400);
+  });
+
   it('delivers a signed escrow.funded event whose signature verifies', async () => {
     fetchMode = 'ok';
     fetchCalls.length = 0;
