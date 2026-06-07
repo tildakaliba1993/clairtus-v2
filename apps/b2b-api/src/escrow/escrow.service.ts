@@ -480,9 +480,15 @@ export class EscrowService {
       if (!p) return { handled: false };
       const newStatus = event.type === 'payout.succeeded' ? 'succeeded' : 'failed';
       if (p.status === newStatus) return { handled: true }; // idempotent re-delivery
+
+      // A2: a late `transfer.failed` after an optimistic post (createPayout/dispatchQueuedPayout post on
+      // any non-`failed` rail status, incl. `pending`) must reverse the ledger or the recipient stays
+      // debited while money never left — the seller silently loses funds. Re-credit `recipient_payable`.
+      const reversed = event.type === 'payout.failed' ? await this.reversePayoutPosting(p.tenant_id, p.id) : false;
+
       await this.sql.query(`update payouts set status = $1 where id = $2 and tenant_id = $3`, [newStatus, p.id, p.tenant_id]);
       await this.webhooks.emit(p.tenant_id, { type: event.type === 'payout.succeeded' ? 'payout.succeeded' : 'payout.failed', escrowId: p.escrow_id, data: { payoutId: p.id, railRef: event.railRef } });
-      await this.audit.record({ tenantId: p.tenant_id, action: event.type === 'payout.succeeded' ? 'payout.succeeded' : 'payout.failed', resourceType: 'payout', resourceId: p.id, escrowId: p.escrow_id, actor: 'rail', metadata: { railRef: event.railRef } });
+      await this.audit.record({ tenantId: p.tenant_id, action: event.type === 'payout.succeeded' ? 'payout.succeeded' : 'payout.failed', resourceType: 'payout', resourceId: p.id, escrowId: p.escrow_id, actor: 'rail', metadata: { railRef: event.railRef, ...(reversed ? { ledgerReversed: true } : {}) } });
       return { handled: true };
     }
 
@@ -492,6 +498,23 @@ export class EscrowService {
   private async loadEscrowAnyTenant(id: string): Promise<(EscrowRow & { tenant_id: string }) | null> {
     const { rows } = await this.sql.query<EscrowRow & { tenant_id: string }>(`select * from escrows where id = $1`, [id]);
     return rows[0] ?? null;
+  }
+
+  /**
+   * A2: reverse the optimistic `payout:{id}` posting so the recipient's payable is restored. Returns
+   * whether a reversal was posted. Idempotent two ways: a payout never posted (e.g. still queued) has
+   * no group to reverse (no-op), and the reversal itself is keyed on `payout-reversal:{id}` so a
+   * repeated reverse is a ledger no-op.
+   */
+  private async reversePayoutPosting(tenantId: string, payoutId: string): Promise<boolean> {
+    const { rows } = await this.sql.query<{ id: string }>(
+      `select id from ledger_posting_groups where tenant_id = $1 and reference = $2`,
+      [tenantId, `payout:${payoutId}`],
+    );
+    const original = rows[0];
+    if (!original) return false; // never posted — nothing to reverse
+    await this.ledger.reverse(original.id, `payout-reversal:${payoutId}`, tenantId);
+    return true;
   }
 
   // ---- balances & ledger -------------------------------------------------

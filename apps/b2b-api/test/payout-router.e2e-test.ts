@@ -139,6 +139,30 @@ describe('payouts via RailRouter (PR-8.1)', () => {
     expect(await owedBalance(sellerId)).toBe(0); // now debited via the worker
   });
 
+  it('reverses the optimistic ledger post on a late transfer.failed, re-crediting the recipient (A2)', async () => {
+    a.state.down = false;
+    b.state.down = false;
+    const { escrowId, sellerId } = await owedEscrow();
+    const res = await http().post('/v1/payouts').set('Authorization', liveAuth).set(idem())
+      .send({ escrowId, recipientPartyId: sellerId, amount: 98500 });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('succeeded');
+    expect(await owedBalance(sellerId)).toBe(0); // optimistically debited on accept
+
+    // The rail later reports the transfer actually failed — money never left.
+    const out = await svc.handleRailEvent({ type: 'payout.failed', railRef: res.body.id, reference: res.body.id, raw: {} });
+    expect(out.handled).toBe(true);
+
+    // The recipient is made whole and the payout is marked failed.
+    expect(await owedBalance(sellerId)).toBe(98500);
+    const row = await sql.query<{ status: string }>(`select status from payouts where id = $1`, [res.body.id]);
+    expect(row.rows[0]!.status).toBe('failed');
+
+    // Re-delivery of the failure is a no-op — no double re-credit.
+    await svc.handleRailEvent({ type: 'payout.failed', railRef: res.body.id, reference: res.body.id, raw: {} });
+    expect(await owedBalance(sellerId)).toBe(98500);
+  });
+
   it('dead-letters a dispatch job once it exhausts its attempts', async () => {
     a.state.down = true;
     b.state.down = true;
