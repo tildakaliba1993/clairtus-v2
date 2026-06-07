@@ -70,9 +70,10 @@ correct, it's system-level.)
   `AuthVerifier` already exist; wire the guard.)
 - **B9. AML completeness** — no automated **sanctions/PEP** screening; structuring is flagged but not
   actioned (no case queue); compliance volume counts **created** (not funded) escrows.
-- **B10. Webhook robustness** — outbound has retry+DLQ (good); inbound concurrent duplicate `charge.success`
-  is saved by ledger-reference idempotency but can double-emit the outbound `escrow.funded`. Document
-  receiver dedupe; enforce HTTPS endpoints.
+- **B10. Webhook robustness** — outbound has retry+DLQ (good); **HTTPS endpoints now enforced** ✅
+  (`registerEndpoint` rejects non-https/malformed URLs → 400, via API and onboarding). Remaining: inbound
+  concurrent duplicate `charge.success` is saved by ledger-reference idempotency but can still double-emit
+  the outbound `escrow.funded` — receivers should dedupe on event id (document + optional emit dedupe).
 - **B11. ✅ `/system/metrics` scoped to operators** — the endpoint now requires the operator-only
   `ops:read` scope (not in `DEFAULT_WRITE_SCOPES`), so a standard tenant key gets 403; mint an ops key
   with `ops:read` for monitoring/alerting. No more system-wide counts leaking to any authenticated tenant.
