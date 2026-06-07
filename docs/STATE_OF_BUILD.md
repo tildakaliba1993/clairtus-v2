@@ -30,7 +30,7 @@ _Last updated: 2026-06-06._ Pair with [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md)
 |---|---|
 | `@clairtus/shared` | `Money` (integer minor units) + arithmetic + `applyBps`. |
 | `@clairtus/core` | Escrow state machine (`applyEscrowEvent`), fee/split (`computeFeeBreakdown`), escrow→ledger posting builders (`buildFundPosting`/`buildReleasePosting`/`buildRefundPosting`/`buildPayoutPosting`). |
-| `@clairtus/ledger` | Double-entry ledger (accounts/entries/posting groups), `post` (atomic+balanced), `getBalance`, `reverse`, idempotency on reference. Account types: `escrow_held`, `recipient_payable`, `tenant_payable`, `clairtus_revenue`, `external`. |
+| `@clairtus/ledger` | Double-entry ledger (accounts/entries/posting groups), `post` (atomic+balanced), `getBalance`, `reverse`, idempotency on reference. Account types: `escrow_held`, `recipient_payable`, `tenant_payable`, `clairtus_revenue`, `psp_fees`, `external`. |
 | `@clairtus/compliance` | Per-market limit engine: `checkAmountBounds`, `checkVolumeLimits`, `isStructuring`, `toUsd/fromUsd`, `BCC_RULES`. (Works in USD/major; the API converts minor→USD.) |
 | `@clairtus/payments` | `PaymentRail` interface + `NormalizedEvent` + **`RailRouter`** (`run` w/ failover) + **`CircuitBreaker`** + adapters: **PawaPay** (DRC), **Korapay** (SA/NG pay-in + payout-from-balance + webhook HMAC + `getBalances`), **SimulatedRail** (sandbox). |
 | `@clairtus/kyc` | `KycProvider` + **Smile ID** adapter. |
