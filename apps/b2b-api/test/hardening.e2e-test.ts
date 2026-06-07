@@ -132,3 +132,39 @@ describe('input validation (PR-2.4)', () => {
     expect(res.status).toBe(422);
   });
 });
+
+describe('malformed :id path params reject at the edge (400, not 500)', () => {
+  const auth = () => ({ Authorization: `Bearer ${fullKey}` });
+  const idem = () => ({ 'Idempotency-Key': randomUUID() });
+
+  // Every :id route binds a `uuid` column; a non-UUID id must be a clean 400, never a 500 from a
+  // Postgres "invalid input syntax for type uuid" cast error.
+  it('GET escrow / party / payout / kyc-check with a non-UUID id → 400', async () => {
+    for (const path of ['/v1/escrows/not-a-uuid', '/v1/parties/not-a-uuid', '/v1/payouts/not-a-uuid', '/v1/kyc/checks/not-a-uuid']) {
+      const res = await http().get(path).set(auth());
+      expect(res.status, path).toBe(400);
+      expect(res.body.error.code, path).toBe('bad_request');
+    }
+  });
+
+  it('escrow mutations with a non-UUID id → 400', async () => {
+    for (const action of ['fund', 'release', 'refund']) {
+      const res = await http().post(`/v1/escrows/not-a-uuid/${action}`).set(auth()).set(idem());
+      expect(res.status, action).toBe(400);
+    }
+    for (const action of ['cancel', 'dispute']) {
+      const res = await http().post(`/v1/escrows/not-a-uuid/${action}`).set(auth());
+      expect(res.status, action).toBe(400);
+    }
+  });
+
+  it('key revoke and webhook-delivery replay with a non-UUID id → 400', async () => {
+    expect((await http().post('/v1/keys/undefined/revoke').set(auth())).status).toBe(400);
+    expect((await http().post('/v1/webhook-deliveries/undefined/replay').set(auth())).status).toBe(400);
+  });
+
+  it('a valid (well-formed) but unknown UUID still 404s — not rejected by the format check', async () => {
+    const res = await http().get(`/v1/escrows/${randomUUID()}`).set(auth());
+    expect(res.status).toBe(404);
+  });
+});

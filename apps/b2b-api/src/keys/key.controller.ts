@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, NotFoundException, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Tenancy, type AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
@@ -41,7 +41,7 @@ export class KeyController {
   @Post(':id/revoke')
   @HttpCode(200)
   @Scopes(SCOPES.keysWrite)
-  async revoke(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  async revoke(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     const revoked = await this.tenancy.revokeApiKey(id, t.tenantId);
     if (!revoked) throw new NotFoundException('key not found'); // wrong tenant / already revoked / unknown
     await this.audit.record({ tenantId: t.tenantId, action: 'apikey.revoked', resourceType: 'apikey', resourceId: id });
