@@ -61,5 +61,9 @@ export interface NormalizedEvent {
   type: NormalizedEventType;
   railRef: string;
   reference?: string;
+  /** Gross transaction amount the provider reports settled, in integer MINOR units (when available). */
+  amount?: number;
+  /** Provider (PSP) fee deducted before settlement, in integer MINOR units (when available). */
+  fee?: number;
   raw?: unknown;
 }

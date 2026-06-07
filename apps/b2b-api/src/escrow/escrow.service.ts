@@ -456,18 +456,38 @@ export class EscrowService {
         return { handled: true };
       }
       const breakdown = this.breakdown(e);
+      const expectedDeposit = breakdown.depositAmount.amount;
+      // A3: post the ACTUAL settled amount the rail reports, not the expected deposit. Korapay credits
+      // net of its fee and the buyer can under/overpay; posting the expected value overstates custody and
+      // permanently drifts the ledger from the PSP. Fall back to the expected deposit when the rail
+      // doesn't report amounts (e.g. SimulatedRail / sandbox).
+      const gross = event.amount ?? expectedDeposit;
+      const fee = event.fee ?? 0;
+      const settledNet = gross - fee;
+      if (settledNet <= 0) {
+        await this.sql.query(`update payins set status = 'failed', updated_at = now() where escrow_id = $1 and tenant_id = $2`, [escrowId, tenantId]);
+        await this.audit.record({ tenantId, action: 'escrow.payin_failed', resourceType: 'escrow', resourceId: escrowId, escrowId, actor: 'rail', metadata: { reason: 'non-positive settled amount', gross, fee } });
+        return { handled: true };
+      }
+      // Under/overpayment policy: fund with the actual net (never strand the buyer's money) and surface
+      // any discrepancy loudly for ops rather than swallowing it. A top-up / partial-funding flow for
+      // genuine underpayment is future work (ties to milestone payouts, gap B6).
+      const shortfallMinor = expectedDeposit - settledNet;
       const external = await this.account(tenantId, 'external', e.currency, null);
+      const pspFees = fee > 0 ? await this.account(tenantId, 'psp_fees', e.currency, null) : undefined;
       await this.ledger.post(
         buildFundPosting({
           tenantId, reference: `fund:${escrowId}`, currency: e.currency, escrowId,
-          depositAmount: breakdown.depositAmount.amount,
-          accounts: { external, held: e.held_account_id },
+          depositAmount: settledNet,
+          ...(fee > 0 ? { fee } : {}),
+          accounts: { external, held: e.held_account_id, ...(pspFees ? { pspFees } : {}) },
         }),
       );
       await this.setStatus(tenantId, escrowId, this.transition(e.status, 'FUNDING_CONFIRMED'));
       await this.sql.query(`update payins set status = 'succeeded', updated_at = now() where escrow_id = $1 and tenant_id = $2`, [escrowId, tenantId]);
-      await this.webhooks.emit(tenantId, { type: 'escrow.funded', escrowId, data: { depositAmount: breakdown.depositAmount.amount } });
-      await this.audit.record({ tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: escrowId, escrowId, actor: 'rail', metadata: { depositAmount: breakdown.depositAmount.amount, via: 'webhook' } });
+      const fundData = { depositAmount: settledNet, expectedAmount: expectedDeposit, feeAmount: fee, ...(shortfallMinor !== 0 ? { shortfallMinor } : {}) };
+      await this.webhooks.emit(tenantId, { type: 'escrow.funded', escrowId, data: fundData });
+      await this.audit.record({ tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: escrowId, escrowId, actor: 'rail', metadata: { ...fundData, via: 'webhook' } });
       return { handled: true };
     }
 

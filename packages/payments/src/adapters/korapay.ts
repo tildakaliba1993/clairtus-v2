@@ -171,12 +171,18 @@ export class KorapayRail implements PaymentRail {
   }
 
   parseWebhook(body: unknown, _headers?: Record<string, string>): NormalizedEvent | null {
-    const b = body as { event?: string; data?: { reference?: string } } | null;
+    const b = body as { event?: string; data?: { reference?: string; amount?: string | number; fee?: string | number } } | null;
     if (!b || !b.event || !b.data) return null;
     const ref = b.data.reference ?? '';
+    // Korapay reports settled amounts in MAJOR units (e.g. "1000.00"); carry them as minor units so the
+    // core can post the actual settled net (and model the PSP fee) rather than the expected deposit.
+    const minor = (v: string | number | undefined): number | undefined =>
+      v === undefined || v === null || v === '' ? undefined : toMinorAmount(Number(v));
+    const amount = minor(b.data.amount);
+    const fee = minor(b.data.fee);
     switch (b.event) {
       case 'charge.success':
-        return { type: 'payin.succeeded', railRef: ref, reference: ref, raw: b };
+        return { type: 'payin.succeeded', railRef: ref, reference: ref, amount, fee, raw: b };
       case 'charge.failed':
         return { type: 'payin.failed', railRef: ref, reference: ref, raw: b };
       case 'transfer.success':
