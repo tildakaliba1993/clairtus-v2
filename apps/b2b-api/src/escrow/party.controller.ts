@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
@@ -19,7 +19,7 @@ export class PartyController {
   }
 
   @Get(':id')
-  get(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  get(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.getParty(t.tenantId, id);
   }
 }

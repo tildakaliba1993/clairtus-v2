@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
@@ -25,7 +25,7 @@ export class EscrowController {
   }
 
   @Get(':id')
-  get(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  get(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.getEscrow(t.tenantId, id);
   }
 
@@ -33,7 +33,7 @@ export class EscrowController {
   @HttpCode(200)
   @Scopes(SCOPES.escrowsWrite)
   @RequireIdempotencyKey()
-  fund(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  fund(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.fund(t.tenantId, id, t.mode);
   }
 
@@ -41,7 +41,7 @@ export class EscrowController {
   @HttpCode(200)
   @Scopes(SCOPES.escrowsWrite)
   @RequireIdempotencyKey()
-  release(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  release(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.release(t.tenantId, id);
   }
 
@@ -49,21 +49,21 @@ export class EscrowController {
   @HttpCode(200)
   @Scopes(SCOPES.escrowsWrite)
   @RequireIdempotencyKey()
-  refund(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  refund(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.refund(t.tenantId, id);
   }
 
   @Post(':id/cancel')
   @HttpCode(200)
   @Scopes(SCOPES.escrowsWrite)
-  cancel(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  cancel(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.cancel(t.tenantId, id);
   }
 
   @Post(':id/dispute')
   @HttpCode(200)
   @Scopes(SCOPES.escrowsWrite)
-  dispute(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  dispute(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.svc.dispute(t.tenantId, id);
   }
 }

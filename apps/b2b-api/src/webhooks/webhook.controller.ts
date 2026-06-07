@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import type { AuthContext } from '@clairtus/tenancy';
 import { CurrentTenant } from '../common/tenant.decorator';
 import { WebhookService } from './webhook.service';
@@ -20,7 +20,7 @@ export class WebhookController {
 
   @Post('webhook-deliveries/:id/replay')
   @HttpCode(200)
-  async replay(@CurrentTenant() t: AuthContext, @Param('id') id: string) {
+  async replay(@CurrentTenant() t: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     await this.svc.replay(t.tenantId, id);
     return { ok: true };
   }
