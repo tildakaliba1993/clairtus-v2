@@ -5,6 +5,7 @@ export type AccountType =
   | 'recipient_payable'
   | 'tenant_payable'
   | 'clairtus_revenue'
+  | 'psp_fees'
   | 'external';
 
 export type Direction = 'debit' | 'credit';
