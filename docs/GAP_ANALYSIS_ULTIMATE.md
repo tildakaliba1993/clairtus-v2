@@ -52,9 +52,11 @@ correct, it's system-level.)
   `JOB_QUEUE_SCHEMA` apply is deduped. Future schema changes: append `0002_…` with ALTER/backfill.
 - **B2. OpenTelemetry exports little** — `common/tracing.ts` starts `NodeSDK` with **no instrumentations**.
   Add `@opentelemetry/auto-instrumentations-node` (or manual spans) so traces aren't near-empty.
-- **B3. Reconciliation ignores PSP pending balance + fees** — `recon` compares ledger vs **available**
-  only; Korapay holds funds as **pending** + deducts fees ⇒ false drift. Reconcile `available+pending`
-  and fees (ties to A3).
+- **B3. ✅ Reconciliation counts PSP pending + surfaces fees** — `reconcile()` now takes
+  `{available,pending}` per currency and compares custody vs **available+pending** (the `reconcile`
+  script passed available-only before → false drift on funds parked in pending). Ledger custody is
+  net-of-fees since A3, so it matches the net PSP balance; the `psp_fees` total is reported per row
+  (`feesMinor`) for visibility, not counted as drift.
 - **B4. Audit log not transactional with the money op** — `audit.record` is awaited *after* the ledger
   post; a crash/failure between ⇒ money op with no audit row. Write it in the same transaction.
 - **B5. Rate limiting is in-memory** (`@nestjs/throttler` default store) — per-instance, resets on deploy,
