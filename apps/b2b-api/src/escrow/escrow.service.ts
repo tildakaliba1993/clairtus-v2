@@ -20,14 +20,14 @@ import {
   type EscrowEventType,
   type FeeResponsibility,
 } from '@clairtus/core';
-import { Ledger, type AccountType } from '@clairtus/ledger';
+import { Ledger, type AccountType, type PostingGroupInput } from '@clairtus/ledger';
 import { RailRoutingError, type PaymentRail, type NormalizedEvent, type RouteCriteria } from '@clairtus/payments';
 import { JobQueue } from '@clairtus/queue';
 import type { ApiKeyMode } from '@clairtus/tenancy';
 import { SQL, RAIL, PAYOUT_ROUTERS, JOB_QUEUE, type SqlExecutor } from '../db/sql';
 import { WebhookService } from '../webhooks/webhook.service';
 import { ComplianceService } from './compliance';
-import { AuditService } from '../audit/audit.service';
+import { AuditService, type AuditEntry } from '../audit/audit.service';
 import { buildPage, decodeCursor } from '../common/pagination';
 import { type PayoutRouters, type PayoutDispatchJob, PAYOUT_DISPATCH_QUEUE } from './payout-dispatch';
 import type { CreatePartyDto, CreateEscrowDto, CreatePayoutDto } from './escrow.dto';
@@ -200,16 +200,16 @@ export class EscrowService {
     status = this.transition(status, 'FUNDING_CONFIRMED');
 
     const external = await this.account(tenantId, 'external', e.currency, null);
-    await this.ledger.post(
+    await this.postWithAudit(
       buildFundPosting({
         tenantId, reference: `fund:${id}`, currency: e.currency, escrowId: id,
         depositAmount: breakdown.depositAmount.amount,
         accounts: { external, held: e.held_account_id },
       }),
+      { tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { depositAmount: breakdown.depositAmount.amount } },
     );
     await this.setStatus(tenantId, id, status);
     await this.webhooks.emit(tenantId, { type: 'escrow.funded', escrowId: id, data: { depositAmount: breakdown.depositAmount.amount } });
-    await this.audit.record({ tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { depositAmount: breakdown.depositAmount.amount } });
     return { ...(await this.getEscrow(tenantId, id)), depositAmount: breakdown.depositAmount.amount };
   }
 
@@ -243,12 +243,12 @@ export class EscrowService {
         ? { secondaryRecipient: await this.account(tenantId, 'recipient_payable', e.currency, e.secondary_party_id!) }
         : {}),
     };
-    await this.ledger.post(
+    await this.postWithAudit(
       buildReleasePosting({ tenantId, reference: `release:${id}`, currency: e.currency, escrowId: id, breakdown, accounts }),
+      { tenantId, action: 'escrow.released', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { primaryNet: breakdown.primaryNet.amount, revenue: breakdown.platformRevenue.amount } },
     );
     await this.setStatus(tenantId, id, status);
     await this.webhooks.emit(tenantId, { type: 'escrow.released', escrowId: id, data: { primaryNet: breakdown.primaryNet.amount, revenue: breakdown.platformRevenue.amount } });
-    await this.audit.record({ tenantId, action: 'escrow.released', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { primaryNet: breakdown.primaryNet.amount, revenue: breakdown.platformRevenue.amount } });
     return this.getEscrow(tenantId, id);
   }
 
@@ -259,16 +259,16 @@ export class EscrowService {
 
     const breakdown = this.breakdown(e);
     const external = await this.account(tenantId, 'external', e.currency, null);
-    await this.ledger.post(
+    await this.postWithAudit(
       buildRefundPosting({
         tenantId, reference: `refund:${id}`, currency: e.currency, escrowId: id,
         depositAmount: breakdown.depositAmount.amount,
         accounts: { held: e.held_account_id, external },
       }),
+      { tenantId, action: 'escrow.refunded', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { depositAmount: breakdown.depositAmount.amount } },
     );
     await this.setStatus(tenantId, id, status);
     await this.webhooks.emit(tenantId, { type: 'escrow.refunded', escrowId: id, data: { depositAmount: breakdown.depositAmount.amount } });
-    await this.audit.record({ tenantId, action: 'escrow.refunded', resourceType: 'escrow', resourceId: id, escrowId: id, metadata: { depositAmount: breakdown.depositAmount.amount } });
     return this.getEscrow(tenantId, id);
   }
 
@@ -351,13 +351,16 @@ export class EscrowService {
     }
 
     // Move funds out of the recipient balance once the disbursement is accepted — never on a FAILED
-    // result, and not while a retry is still queued (the worker posts on the eventual success).
-    if (status !== 'failed' && !queuedRetry) {
-      await this.ledger.post(
+    // result, and not while a retry is still queued (the worker posts on the eventual success). When we
+    // do post, the audit row is written in the same transaction (B4).
+    const posted = status !== 'failed' && !queuedRetry;
+    if (posted) {
+      await this.postWithAudit(
         buildPayoutPosting({
           tenantId, reference: `payout:${payoutId}`, currency: escrow.currency, escrowId: dto.escrowId,
           amount: dto.amount, recipientAccount, externalAccount: external,
         }),
+        { tenantId, action: 'payout.created', resourceType: 'payout', resourceId: payoutId, escrowId: dto.escrowId, metadata: { amount: dto.amount, status, railRef } },
       );
     }
 
@@ -369,7 +372,10 @@ export class EscrowService {
         escrowId: dto.escrowId,
         data: { payoutId, amount: dto.amount, railRef },
       });
-      await this.audit.record({ tenantId, action: status === 'failed' ? 'payout.failed' : 'payout.created', resourceType: 'payout', resourceId: payoutId, escrowId: dto.escrowId, metadata: { amount: dto.amount, status, railRef } });
+      // The posted case already audited atomically above; here only the no-money FAILED case remains.
+      if (!posted) {
+        await this.audit.record({ tenantId, action: 'payout.failed', resourceType: 'payout', resourceId: payoutId, escrowId: dto.escrowId, metadata: { amount: dto.amount, status, railRef } });
+      }
     }
     return { id: payoutId, escrowId: dto.escrowId, recipientPartyId: dto.recipientPartyId, amount: dto.amount, currency: escrow.currency, rail: railId, railRef, status, createdAt: ins.rows[0]!.created_at };
   }
@@ -398,21 +404,25 @@ export class EscrowService {
     await this.sql.query(`update payouts set rail = $1, rail_ref = $2, status = $3 where id = $4 and tenant_id = $5`,
       [used!.id, res.railRef, res.status, job.payoutId, job.tenantId]);
 
-    if (res.status !== 'failed') {
+    const posted = res.status !== 'failed';
+    if (posted) {
       const recipientAccount = await this.account(job.tenantId, 'recipient_payable', job.currency, job.recipientPartyId);
       const external = await this.account(job.tenantId, 'external', job.currency, null);
-      await this.ledger.post(
+      await this.postWithAudit(
         buildPayoutPosting({
           tenantId: job.tenantId, reference: `payout:${job.payoutId}`, currency: job.currency, escrowId: job.escrowId,
           amount: job.amount, recipientAccount, externalAccount: external,
         }),
+        { tenantId: job.tenantId, action: 'payout.created', resourceType: 'payout', resourceId: job.payoutId, escrowId: job.escrowId, actor: 'worker', metadata: { amount: job.amount, status: res.status, via: 'queue' } },
       );
     }
     await this.webhooks.emit(job.tenantId, {
       type: res.status === 'failed' ? 'payout.failed' : 'payout.succeeded',
       escrowId: job.escrowId, data: { payoutId: job.payoutId, amount: job.amount, railRef: res.railRef },
     });
-    await this.audit.record({ tenantId: job.tenantId, action: res.status === 'failed' ? 'payout.failed' : 'payout.created', resourceType: 'payout', resourceId: job.payoutId, escrowId: job.escrowId, actor: 'worker', metadata: { amount: job.amount, status: res.status, via: 'queue' } });
+    if (!posted) {
+      await this.audit.record({ tenantId: job.tenantId, action: 'payout.failed', resourceType: 'payout', resourceId: job.payoutId, escrowId: job.escrowId, actor: 'worker', metadata: { amount: job.amount, status: res.status, via: 'queue' } });
+    }
   }
 
   async getPayout(tenantId: string, id: string) {
@@ -475,19 +485,19 @@ export class EscrowService {
       const shortfallMinor = expectedDeposit - settledNet;
       const external = await this.account(tenantId, 'external', e.currency, null);
       const pspFees = fee > 0 ? await this.account(tenantId, 'psp_fees', e.currency, null) : undefined;
-      await this.ledger.post(
+      const fundData = { depositAmount: settledNet, expectedAmount: expectedDeposit, feeAmount: fee, ...(shortfallMinor !== 0 ? { shortfallMinor } : {}) };
+      await this.postWithAudit(
         buildFundPosting({
           tenantId, reference: `fund:${escrowId}`, currency: e.currency, escrowId,
           depositAmount: settledNet,
           ...(fee > 0 ? { fee } : {}),
           accounts: { external, held: e.held_account_id, ...(pspFees ? { pspFees } : {}) },
         }),
+        { tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: escrowId, escrowId, actor: 'rail', metadata: { ...fundData, via: 'webhook' } },
       );
       await this.setStatus(tenantId, escrowId, this.transition(e.status, 'FUNDING_CONFIRMED'));
       await this.sql.query(`update payins set status = 'succeeded', updated_at = now() where escrow_id = $1 and tenant_id = $2`, [escrowId, tenantId]);
-      const fundData = { depositAmount: settledNet, expectedAmount: expectedDeposit, feeAmount: fee, ...(shortfallMinor !== 0 ? { shortfallMinor } : {}) };
       await this.webhooks.emit(tenantId, { type: 'escrow.funded', escrowId, data: fundData });
-      await this.audit.record({ tenantId, action: 'escrow.funded', resourceType: 'escrow', resourceId: escrowId, escrowId, actor: 'rail', metadata: { ...fundData, via: 'webhook' } });
       return { handled: true };
     }
 
@@ -501,14 +511,23 @@ export class EscrowService {
       const newStatus = event.type === 'payout.succeeded' ? 'succeeded' : 'failed';
       if (p.status === newStatus) return { handled: true }; // idempotent re-delivery
 
-      // A2: a late `transfer.failed` after an optimistic post (createPayout/dispatchQueuedPayout post on
-      // any non-`failed` rail status, incl. `pending`) must reverse the ledger or the recipient stays
-      // debited while money never left — the seller silently loses funds. Re-credit `recipient_payable`.
-      const reversed = event.type === 'payout.failed' ? await this.reversePayoutPosting(p.tenant_id, p.id) : false;
-
       await this.sql.query(`update payouts set status = $1 where id = $2 and tenant_id = $3`, [newStatus, p.id, p.tenant_id]);
+
+      if (event.type === 'payout.failed') {
+        // A2 + B4: a late `transfer.failed` after an optimistic post (createPayout/dispatchQueuedPayout
+        // post on any non-`failed` rail status, incl. `pending`) must reverse the ledger or the recipient
+        // stays debited while money never left — the seller silently loses funds. Reverse + audit atomically.
+        const reversed = await this.reversePostingWithAudit(
+          p.tenant_id, `payout:${p.id}`, `payout-reversal:${p.id}`,
+          { tenantId: p.tenant_id, action: 'payout.failed', resourceType: 'payout', resourceId: p.id, escrowId: p.escrow_id, actor: 'rail', metadata: { railRef: event.railRef, ledgerReversed: true } },
+        );
+        if (!reversed) {
+          await this.audit.record({ tenantId: p.tenant_id, action: 'payout.failed', resourceType: 'payout', resourceId: p.id, escrowId: p.escrow_id, actor: 'rail', metadata: { railRef: event.railRef } });
+        }
+      } else {
+        await this.audit.record({ tenantId: p.tenant_id, action: 'payout.succeeded', resourceType: 'payout', resourceId: p.id, escrowId: p.escrow_id, actor: 'rail', metadata: { railRef: event.railRef } });
+      }
       await this.webhooks.emit(p.tenant_id, { type: event.type === 'payout.succeeded' ? 'payout.succeeded' : 'payout.failed', escrowId: p.escrow_id, data: { payoutId: p.id, railRef: event.railRef } });
-      await this.audit.record({ tenantId: p.tenant_id, action: event.type === 'payout.succeeded' ? 'payout.succeeded' : 'payout.failed', resourceType: 'payout', resourceId: p.id, escrowId: p.escrow_id, actor: 'rail', metadata: { railRef: event.railRef, ...(reversed ? { ledgerReversed: true } : {}) } });
       return { handled: true };
     }
 
@@ -518,23 +537,6 @@ export class EscrowService {
   private async loadEscrowAnyTenant(id: string): Promise<(EscrowRow & { tenant_id: string }) | null> {
     const { rows } = await this.sql.query<EscrowRow & { tenant_id: string }>(`select * from escrows where id = $1`, [id]);
     return rows[0] ?? null;
-  }
-
-  /**
-   * A2: reverse the optimistic `payout:{id}` posting so the recipient's payable is restored. Returns
-   * whether a reversal was posted. Idempotent two ways: a payout never posted (e.g. still queued) has
-   * no group to reverse (no-op), and the reversal itself is keyed on `payout-reversal:{id}` so a
-   * repeated reverse is a ledger no-op.
-   */
-  private async reversePayoutPosting(tenantId: string, payoutId: string): Promise<boolean> {
-    const { rows } = await this.sql.query<{ id: string }>(
-      `select id from ledger_posting_groups where tenant_id = $1 and reference = $2`,
-      [tenantId, `payout:${payoutId}`],
-    );
-    const original = rows[0];
-    if (!original) return false; // never posted — nothing to reverse
-    await this.ledger.reverse(original.id, `payout-reversal:${payoutId}`, tenantId);
-    return true;
   }
 
   // ---- balances & ledger -------------------------------------------------
@@ -641,6 +643,32 @@ export class EscrowService {
 
   private async setStatus(tenantId: string, id: string, status: EscrowStatus): Promise<void> {
     await this.sql.query(`update escrows set status = $1, updated_at = now() where id = $2 and tenant_id = $3`, [status, id, tenantId]);
+  }
+
+  /**
+   * B4: post to the ledger and write its audit row in ONE transaction, so a crash can never leave a
+   * money movement without its audit record (or vice versa). Account resolution happens before the call.
+   */
+  private async postWithAudit(group: PostingGroupInput, entry: AuditEntry): Promise<void> {
+    await this.sql.transaction(async (tx) => {
+      await this.ledger.post(group, tx);
+      await this.audit.record(entry, tx);
+    });
+  }
+
+  /** B4: reverse a posting group and write its audit row atomically. Returns false if nothing to reverse. */
+  private async reversePostingWithAudit(tenantId: string, originalRef: string, reversalRef: string, entry: AuditEntry): Promise<boolean> {
+    const { rows } = await this.sql.query<{ id: string }>(
+      `select id from ledger_posting_groups where tenant_id = $1 and reference = $2`,
+      [tenantId, originalRef],
+    );
+    const original = rows[0];
+    if (!original) return false;
+    await this.sql.transaction(async (tx) => {
+      await this.ledger.reverse(original.id, reversalRef, tenantId, tx);
+      await this.audit.record(entry, tx);
+    });
+    return true;
   }
 
   private toEscrowDto(r: EscrowRow) {

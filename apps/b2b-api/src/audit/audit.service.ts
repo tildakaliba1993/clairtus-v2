@@ -21,8 +21,9 @@ export interface AuditEntry {
 export class AuditService {
   constructor(@Inject(SQL) private readonly sql: SqlExecutor) {}
 
-  async record(entry: AuditEntry): Promise<void> {
-    await this.sql.query(
+  /** Pass `executor` to write the audit row inside a caller's transaction (atomic with the money op). */
+  async record(entry: AuditEntry, executor: SqlExecutor = this.sql): Promise<void> {
+    await executor.query(
       `insert into audit_log (tenant_id, action, resource_type, resource_id, escrow_id, actor, metadata)
        values ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
       [
