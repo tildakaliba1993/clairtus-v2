@@ -1,0 +1,11 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/kyc-init/route": "/api/kyc-init",
+  "/favicon.ico/route": "/favicon.ico",
+  "/kyc/page": "/kyc",
+  "/page": "/",
+  "/privacy/page": "/privacy",
+  "/receipt/[id]/page": "/receipt/[id]",
+  "/terms/page": "/terms"
+}

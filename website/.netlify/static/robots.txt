@@ -1,0 +1,9 @@
+# *
+User-agent: *
+Allow: /
+
+# Host
+Host: https://clairtus.com
+
+# Sitemaps
+Sitemap: https://clairtus.com/sitemap.xml

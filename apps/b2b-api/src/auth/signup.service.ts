@@ -68,6 +68,11 @@ export class SignupService {
     return { tenantId: row.tenant_id, email: row.email, keys: await this.tenancy.listApiKeys(row.tenant_id) };
   }
 
+  /** The tenant a verified session user owns, or null if they haven't provisioned one yet. */
+  async tenantIdForUser(userId: string): Promise<string | null> {
+    return this.byAuthUser(userId);
+  }
+
   private async byAuthUser(userId: string): Promise<string | null> {
     const { rows } = await this.sql.query<{ tenant_id: string }>(
       `select tenant_id from tenant_users where auth_user_id = $1`,

@@ -63,11 +63,11 @@ correct, it's system-level.)
   full-only. Gig/services marketplaces (the #1 PRD segment) need milestones. Functional gap.
 - **B7. Single Fly machine (no HA); no staging; backups/DR untested** — sandbox is a *mode*, not a deploy.
   Document RPO/RTO + test a restore; add Fly HA.
-- **B8. Self-serve returning-user reconnect** — a returning user with a tenant but no key cookie can't get
-  into the dashboard (`/api/signup` returns no key; `/keys` → requireKey → /connect dead-end). Proper fix:
-  make the **API accept the Supabase session JWT** for tenant reads (a session-auth fallback in
-  `ApiKeyGuard`/a parallel guard), so the dashboard needs no key paste. (Code stub: `tenant_users` + the
-  `AuthVerifier` already exist; wire the guard.)
+- **B8. ✅ Session-JWT authentication (API side)** — `ApiKeyGuard` now accepts a Supabase **session JWT**
+  in addition to API keys: it verifies the token, resolves the owner's tenant via `tenant_users`, and
+  grants the owner scopes in **test mode** (a browser session never moves live money). A logged-in user
+  can use the API/dashboard with no API-key paste. Remaining (dashboard frontend): wire the dashboard +
+  developers page to log in via Supabase and call the API with the session token.
 - **B9. AML completeness** — no automated **sanctions/PEP** screening; structuring is flagged but not
   actioned (no case queue); compliance volume counts **created** (not funded) escrows.
 - **B10. Webhook robustness** — outbound has retry+DLQ (good); **HTTPS endpoints now enforced** ✅
