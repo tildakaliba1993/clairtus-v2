@@ -18,9 +18,9 @@ async function main(): Promise<void> {
     const recon = ctx.get(ReconciliationService);
     const rail = ctx.get<BalanceRail | null>(RAIL, { strict: false });
 
-    const railBalances: Record<string, number> = {};
+    const railBalances: Record<string, { available: number; pending: number }> = {};
     if (rail && typeof rail.getBalances === 'function') {
-      for (const [ccy, bal] of Object.entries(await rail.getBalances())) railBalances[ccy] = bal.available;
+      for (const [ccy, bal] of Object.entries(await rail.getBalances())) railBalances[ccy] = { available: bal.available, pending: bal.pending };
     } else {
       console.warn('No balance-capable rail configured — comparing the ledger against an empty PSP balance.');
     }
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     const rows = await recon.reconcile(railBalances, tolerance);
     let drift = false;
     for (const r of rows) {
-      console.log(`${r.currency}: ledger=${r.ledgerMinor} rail=${r.railMinor} drift=${r.driftMinor} ${r.ok ? 'OK' : 'DRIFT!'}`);
+      console.log(`${r.currency}: ledger=${r.ledgerMinor} rail=${r.railMinor} (avail=${r.availableMinor} pending=${r.pendingMinor}) fees=${r.feesMinor} drift=${r.driftMinor} ${r.ok ? 'OK' : 'DRIFT!'}`);
       drift = drift || !r.ok;
     }
     process.exitCode = drift ? 2 : 0;

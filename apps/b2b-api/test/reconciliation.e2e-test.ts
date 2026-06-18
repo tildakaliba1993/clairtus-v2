@@ -5,6 +5,7 @@ import request from 'supertest';
 import { randomUUID } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Tenancy, type SqlExecutor } from '@clairtus/tenancy';
+import { Ledger } from '@clairtus/ledger';
 import { AppModule } from '../src/app.module';
 import { DEFAULT_WRITE_SCOPES, SCOPES } from '../src/common/scopes';
 import { SQL } from '../src/db/sql';
@@ -33,15 +34,18 @@ function executor(db: PGlite): SqlExecutor {
 
 let app: INestApplication;
 let auth: string;
+let tenantId: string;
 let opsAuth: string; // key with the operator-only ops:read scope
 let recon: ReconciliationService;
+let sql: SqlExecutor;
 
 beforeAll(async () => {
   const db = new PGlite();
-  const sql = executor(db);
+  sql = executor(db);
   await applyAllSchema(sql);
   const tenancy = new Tenancy(sql);
   const t = await tenancy.createTenant({ name: 'Acme', country: 'ZA' });
+  tenantId = t.id;
   auth = `Bearer ${(await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: DEFAULT_WRITE_SCOPES })).plaintext}`;
   opsAuth = `Bearer ${(await tenancy.issueApiKey({ tenantId: t.id, mode: 'test', scopes: [SCOPES.opsRead] })).plaintext}`;
 
@@ -67,13 +71,36 @@ describe('reconciliation: ledger ↔ PSP balance (PR-11.1)', () => {
       .send({ baseAmount: 100000, currency: 'ZAR', feeBps: 0, feeResponsibility: 'SELLER', sellerPartyId: seller })).body.id;
     await http().post(`/v1/escrows/${id}/fund`).set('Authorization', auth).set(idem());
 
-    const matched = await recon.reconcile({ ZAR: 100000 });
+    const matched = await recon.reconcile({ ZAR: { available: 100000, pending: 0 } });
     const zar = matched.find((r) => r.currency === 'ZAR')!;
     expect(zar).toMatchObject({ ledgerMinor: 100000, railMinor: 100000, driftMinor: 0, ok: true });
   });
 
+  it('counts PSP pending balance, not just available, against the ledger (B3)', async () => {
+    // Custody is 100000; the PSP holds 60000 available + 40000 pending = 100000 → NO drift.
+    // (The old available-only comparison would have falsely flagged 40000 of drift.)
+    const r = await recon.reconcile({ ZAR: { available: 60000, pending: 40000 } });
+    const zar = r.find((x) => x.currency === 'ZAR')!;
+    expect(zar).toMatchObject({ ledgerMinor: 100000, availableMinor: 60000, pendingMinor: 40000, railMinor: 100000, driftMinor: 0, ok: true });
+  });
+
+  it('surfaces PSP fees from the psp_fees ledger account (informational, not drift) (B3)', async () => {
+    // Seed a psp_fees credit (offset by external) — neither is custody, so drift is unaffected.
+    const led = new Ledger(sql);
+    const ext = (await led.createAccount({ tenantId, type: 'external', currency: 'ZAR' })).id;
+    const feesAcc = (await led.createAccount({ tenantId, type: 'psp_fees', currency: 'ZAR' })).id;
+    await led.post({ tenantId, reference: `fee-test:${randomUUID()}`, currency: 'ZAR', entries: [
+      { accountId: ext, direction: 'debit', amount: 1500 },
+      { accountId: feesAcc, direction: 'credit', amount: 1500 },
+    ] });
+    const r = await recon.reconcile({ ZAR: { available: 100000, pending: 0 } });
+    const zar = r.find((x) => x.currency === 'ZAR')!;
+    expect(zar.feesMinor).toBe(1500);
+    expect(zar.driftMinor).toBe(0); // fees are reported, not counted against custody
+  });
+
   it('flags drift when the PSP balance disagrees with the ledger', async () => {
-    const short = await recon.reconcile({ ZAR: 90000 });
+    const short = await recon.reconcile({ ZAR: { available: 90000, pending: 0 } });
     const zar = short.find((r) => r.currency === 'ZAR')!;
     expect(zar.driftMinor).toBe(10000);
     expect(zar.ok).toBe(false);
@@ -83,7 +110,7 @@ describe('reconciliation: ledger ↔ PSP balance (PR-11.1)', () => {
     expect(none.find((r) => r.currency === 'ZAR')!.ok).toBe(false);
 
     // Within tolerance → ok.
-    const tol = await recon.reconcile({ ZAR: 90000 }, 10000);
+    const tol = await recon.reconcile({ ZAR: { available: 90000, pending: 0 } }, 10000);
     expect(tol.find((r) => r.currency === 'ZAR')!.ok).toBe(true);
   });
 });
