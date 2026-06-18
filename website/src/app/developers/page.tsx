@@ -31,7 +31,7 @@ export const metadata: Metadata = {
   },
 };
 
-const API_BASE_URL = "https://clairtus-api.fly.dev";
+const API_BASE_URL = "https://api.clairtus.com";
 const API_DOCS_URL = `${API_BASE_URL}/docs`;
 const CONTACT_EMAIL = "mailto:admin@clairtus.com?subject=Clairtus%20API%20access";
 
