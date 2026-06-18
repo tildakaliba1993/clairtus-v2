@@ -256,12 +256,20 @@ export default function Home() {
               priority
             />
           </Link>
-          <a
-            href={whatsappBotUrl}
-            className="rounded-full bg-primary px-4 py-2 text-sm font-semibold font-heading text-primary-foreground shadow-lg shadow-primary/25 transition-transform hover:scale-[1.02] active:scale-[0.98]"
-          >
-            {content.nav.apply}
-          </a>
+          <nav className="flex items-center gap-3 sm:gap-5">
+            <Link
+              href="/developers"
+              className="text-sm font-medium text-white/70 transition-colors hover:text-white"
+            >
+              Developers
+            </Link>
+            <a
+              href={whatsappBotUrl}
+              className="rounded-full bg-primary px-4 py-2 text-sm font-semibold font-heading text-primary-foreground shadow-lg shadow-primary/25 transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            >
+              {content.nav.apply}
+            </a>
+          </nav>
         </div>
       </header>
 
