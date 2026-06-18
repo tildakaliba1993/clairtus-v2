@@ -73,7 +73,7 @@ describe('API-key auth guard', () => {
   it('401 with no key, in the error envelope', async () => {
     const res = await http().get('/v1/whoami');
     expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: { code: 'unauthorized', message: 'Missing API key', statusCode: 401 } });
+    expect(res.body).toEqual({ error: { code: 'unauthorized', message: 'Missing API key or session token', statusCode: 401 } });
   });
 
   it('401 with an unknown key', async () => {
