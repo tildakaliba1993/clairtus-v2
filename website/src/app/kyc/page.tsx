@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import Script from "next/script";
 import Image from "next/image";
@@ -9,7 +9,7 @@ type Step = "loading" | "ready" | "verifying" | "success" | "error";
 
 const WHATSAPP_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_BOT_NUMBER ?? "243000000000";
 
-export default function KYCPage() {
+function KYCContent() {
     const searchParams = useSearchParams();
     const phone        = searchParams.get("phone") ?? "";
 
@@ -230,5 +230,19 @@ export default function KYCPage() {
                 }}
             />
         </div>
+    );
+}
+
+// useSearchParams() bails out of static prerendering, so the page must wrap it in a Suspense boundary.
+export default function KYCPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen bg-[#0d1b2a] text-white flex flex-col items-center justify-center px-4 py-8">
+                <div className="w-10 h-10 rounded-full border-4 border-emerald-500 border-t-transparent animate-spin" />
+                <p className="text-gray-400 text-sm mt-4">Chargement en cours…</p>
+            </div>
+        }>
+            <KYCContent />
+        </Suspense>
     );
 }
