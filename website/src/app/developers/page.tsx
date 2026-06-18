@@ -31,8 +31,9 @@ export const metadata: Metadata = {
   },
 };
 
-const API_DOCS_URL = "https://clairtus-api.fly.dev/docs";
-const CONTACT_EMAIL = "mailto:hello@clairtus.com?subject=Clairtus%20API%20access";
+const API_BASE_URL = "https://clairtus-api.fly.dev";
+const API_DOCS_URL = `${API_BASE_URL}/docs`;
+const CONTACT_EMAIL = "mailto:admin@clairtus.com?subject=Clairtus%20API%20access";
 
 const glassCard =
   "rounded-2xl border border-white/5 bg-white/[0.02] p-6 transition-colors duration-300 hover:border-primary/30 hover:bg-white/[0.04]";
@@ -172,7 +173,7 @@ export default function DevelopersPage() {
                 <span className="ml-3 font-mono text-xs text-white/50">create-escrow.sh</span>
               </div>
               <pre className="overflow-x-auto px-5 py-5 font-mono text-[12.5px] leading-relaxed text-slate-200">
-                <code>{`curl https://api.clairtus.com/v1/escrows \\
+                <code>{`curl ${API_BASE_URL}/v1/escrows \\
   -H "Authorization: Bearer ck_live_…" \\
   -H "Idempotency-Key: $(uuidgen)" \\
   -d currency=ZAR \\
