@@ -338,7 +338,9 @@ export default function DevelopersPage() {
           <span className="text-white/20">|</span>
           <a href={API_DOCS_URL} className="transition-colors duration-200 hover:text-white">API reference</a>
           <span className="text-white/20">|</span>
-          <Link href="/terms" className="transition-colors duration-200 hover:text-white">Terms</Link>
+          <Link href="/developers/terms" className="transition-colors duration-200 hover:text-white">Terms</Link>
+          <span className="text-white/20">|</span>
+          <Link href="/developers/refund-policy" className="transition-colors duration-200 hover:text-white">Refunds</Link>
           <span className="text-white/20">|</span>
           <Link href="/privacy" className="transition-colors duration-200 hover:text-white">Privacy</Link>
         </div>
