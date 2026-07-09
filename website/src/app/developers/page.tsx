@@ -34,6 +34,8 @@ export const metadata: Metadata = {
 const API_BASE_URL = "https://api.clairtus.com";
 const API_DOCS_URL = `${API_BASE_URL}/docs`;
 const CONTACT_EMAIL = "mailto:admin@clairtus.com?subject=Clairtus%20API%20access";
+const DASHBOARD_URL = "https://app.clairtus.com";
+const SIGNUP_URL = `${DASHBOARD_URL}/signup`;
 
 const glassCard =
   "rounded-2xl border border-white/5 bg-white/[0.02] p-6 transition-colors duration-300 hover:border-primary/30 hover:bg-white/[0.04]";
@@ -117,11 +119,14 @@ export default function DevelopersPage() {
             <a href={API_DOCS_URL} className="hidden text-sm font-medium text-white/70 transition-colors hover:text-white sm:block">
               API reference
             </a>
+            <a href={DASHBOARD_URL} className="text-sm font-medium text-white/70 transition-colors hover:text-white">
+              Sign in
+            </a>
             <a
-              href={CONTACT_EMAIL}
+              href={SIGNUP_URL}
               className="rounded-full bg-primary px-4 py-2 text-sm font-semibold font-heading text-primary-foreground shadow-lg shadow-primary/25 transition-transform hover:scale-[1.02] active:scale-[0.98]"
             >
-              Request API access
+              Get started
             </a>
           </nav>
         </div>
@@ -150,10 +155,10 @@ export default function DevelopersPage() {
               </p>
               <div className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row lg:justify-start">
                 <a
-                  href={CONTACT_EMAIL}
+                  href={SIGNUP_URL}
                   className="inline-flex min-h-[52px] min-w-[220px] items-center justify-center rounded-full bg-primary px-10 text-base font-semibold font-heading text-primary-foreground shadow-[0_0_52px_-8px_hsl(var(--primary)/0.85)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
                 >
-                  Request API access
+                  Get started free
                 </a>
                 <a
                   href={API_DOCS_URL}
@@ -313,11 +318,12 @@ export default function DevelopersPage() {
               Build escrow into your product
             </h2>
             <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/[0.68]">
-              Tell us what you&apos;re building and we&apos;ll set you up with sandbox keys and a direct line to the team.
+              Create a free account, get sandbox keys instantly, and start building. Questions?{" "}
+              <a href={CONTACT_EMAIL} className="text-primary hover:underline">Talk to the team</a>.
             </p>
             <div className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <a href={CONTACT_EMAIL} className="inline-flex min-h-[56px] min-w-[min(100%,280px)] items-center justify-center rounded-full bg-primary px-12 text-lg font-semibold font-heading text-primary-foreground shadow-[0_0_60px_-10px_hsl(var(--primary)/0.9)] transition-transform hover:scale-[1.03] active:scale-[0.98]">
-                Request API access
+              <a href={SIGNUP_URL} className="inline-flex min-h-[56px] min-w-[min(100%,280px)] items-center justify-center rounded-full bg-primary px-12 text-lg font-semibold font-heading text-primary-foreground shadow-[0_0_60px_-10px_hsl(var(--primary)/0.9)] transition-transform hover:scale-[1.03] active:scale-[0.98]">
+                Get started free
               </a>
               <a href={API_DOCS_URL} className="inline-flex min-h-[56px] min-w-[min(100%,200px)] items-center justify-center gap-2 rounded-full border border-white/20 bg-white/5 px-8 text-lg font-semibold text-white transition-colors hover:border-white/35 hover:bg-white/10">
                 <BookOpen size={20} strokeWidth={1.9} aria-hidden /> API docs
