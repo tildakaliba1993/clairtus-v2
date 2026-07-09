@@ -55,8 +55,10 @@ correct, it's system-level.)
 - **B3. Reconciliation ignores PSP pending balance + fees** — `recon` compares ledger vs **available**
   only; Korapay holds funds as **pending** + deducts fees ⇒ false drift. Reconcile `available+pending`
   and fees (ties to A3).
-- **B4. Audit log not transactional with the money op** — `audit.record` is awaited *after* the ledger
-  post; a crash/failure between ⇒ money op with no audit row. Write it in the same transaction.
+- **B4. ✅ Audit log transactional with the money op** — `Ledger.post`/`reverse` + `audit.record` now
+  accept an optional executor; `EscrowService.postWithAudit`/`reversePostingWithAudit` run the ledger
+  write and its audit row in **one transaction**, so a crash can't leave a money op without an audit row
+  (or vice versa). Applied to fund/release/refund/payout-create/queued-dispatch/webhook-fund/payout-reversal.
 - **B5. Rate limiting is in-memory** (`@nestjs/throttler` default store) — per-instance, resets on deploy,
   useless under HA. Back with Redis/Postgres or an edge limiter.
 - **B6. No partial release / milestone payouts** — core has no `PARTIALLY_RELEASED`; `release()` is

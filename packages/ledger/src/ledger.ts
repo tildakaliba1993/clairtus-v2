@@ -76,8 +76,12 @@ export class Ledger {
   /**
    * Posts a balanced group of entries atomically.
    * INVARIANT: sum(debits) === sum(credits). Idempotent by (tenant, reference).
+   *
+   * Pass `executor` to run within a caller-supplied transaction (no new transaction is opened) so the
+   * post can be committed atomically with other work — e.g. its audit-log row. Without it, the post
+   * runs in its own transaction as before.
    */
-  async post(group: PostingGroupInput): Promise<{ postingGroupId: string; created: boolean }> {
+  async post(group: PostingGroupInput, executor?: SqlExecutor): Promise<{ postingGroupId: string; created: boolean }> {
     if (group.entries.length < 2) {
       throw new LedgerError('a posting group needs at least two entries');
     }
@@ -94,7 +98,7 @@ export class Ledger {
       throw new LedgerError(`posting group does not balance: debits ${debit} != credits ${credit}`);
     }
 
-    return this.sql.transaction(async (tx) => {
+    const run = async (tx: SqlExecutor): Promise<{ postingGroupId: string; created: boolean }> => {
       const existing = await tx.query<{ id: string }>(
         `select id from ledger_posting_groups where tenant_id = $1 and reference = $2`,
         [group.tenantId, group.reference],
@@ -118,7 +122,9 @@ export class Ledger {
         );
       }
       return { postingGroupId, created: true };
-    });
+    };
+
+    return executor ? run(executor) : this.sql.transaction(run);
   }
 
   /** Derived balance = sum(credits) − sum(debits), in minor units. */
@@ -131,13 +137,18 @@ export class Ledger {
     return Number(rows[0]!.balance);
   }
 
-  /** Reverses a posting group by posting its mirror image under a new reference. */
+  /**
+   * Reverses a posting group by posting its mirror image under a new reference. Pass `executor` to run
+   * within a caller's transaction (e.g. atomic with the reversal's audit row).
+   */
   async reverse(
     postingGroupId: string,
     reference: string,
     tenantId: string,
+    executor?: SqlExecutor,
   ): Promise<{ postingGroupId: string }> {
-    const { rows: entries } = await this.sql.query<{
+    const db = executor ?? this.sql;
+    const { rows: entries } = await db.query<{
       account_id: string; direction: Direction; amount: string | number;
     }>(
       `select account_id, direction, amount from ledger_entries where posting_group_id = $1`,
@@ -145,7 +156,7 @@ export class Ledger {
     );
     if (entries.length === 0) throw new LedgerError('posting group not found');
 
-    const { rows: grp } = await this.sql.query<{ currency: string; escrow_id: string | null }>(
+    const { rows: grp } = await db.query<{ currency: string; escrow_id: string | null }>(
       `select currency, escrow_id from ledger_posting_groups where id = $1`,
       [postingGroupId],
     );
@@ -162,7 +173,7 @@ export class Ledger {
       currency: grp[0]!.currency,
       escrowId: grp[0]!.escrow_id ?? undefined,
       entries: reversed,
-    });
+    }, executor);
     return { postingGroupId: res.postingGroupId };
   }
 }
