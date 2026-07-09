@@ -50,8 +50,9 @@ correct, it's system-level.)
   `schema_migrations`, each applied atomically with its marker; `0001_baseline` is the v1 schema (all
   `create … if not exists`, safe no-op on the live DB). `migrate()` delegates to the runner; the double
   `JOB_QUEUE_SCHEMA` apply is deduped. Future schema changes: append `0002_…` with ALTER/backfill.
-- **B2. OpenTelemetry exports little** — `common/tracing.ts` starts `NodeSDK` with **no instrumentations**.
-  Add `@opentelemetry/auto-instrumentations-node` (or manual spans) so traces aren't near-empty.
+- **B2. ✅ OpenTelemetry auto-instrumentation** — `common/tracing.ts` now registers
+  `@opentelemetry/auto-instrumentations-node` (HTTP + `pg` spans; `fs` disabled) + a `service.name`
+  resource, so traces aren't empty. Still env-gated + lazy-loaded (no-op until `OTEL_EXPORTER_OTLP_ENDPOINT`).
 - **B3. Reconciliation ignores PSP pending balance + fees** — `recon` compares ledger vs **available**
   only; Korapay holds funds as **pending** + deducts fees ⇒ false drift. Reconcile `available+pending`
   and fees (ties to A3).
