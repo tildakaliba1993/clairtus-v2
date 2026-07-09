@@ -342,7 +342,7 @@ export default function DevelopersPage() {
           <span className="text-white/20">|</span>
           <Link href="/developers/refund-policy" className="transition-colors duration-200 hover:text-white">Refunds</Link>
           <span className="text-white/20">|</span>
-          <Link href="/privacy" className="transition-colors duration-200 hover:text-white">Privacy</Link>
+          <Link href="/developers/privacy" className="transition-colors duration-200 hover:text-white">Privacy</Link>
         </div>
       </footer>
     </div>
